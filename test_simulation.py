@@ -84,4 +84,19 @@ class TestSimulation(unittest.TestCase):
         sims.save()
     def test_loadMeta(self):
         pass
-        
+    def test_plotSimulation(self):
+        params =  { 'n':(5, 5),
+                    'nMutations': (0, 3),
+                    'nEpitopes': (0, 2),
+                    'epitopeThreshold': (0,5),
+                    'escapeMutations':(False,False),
+                    'insertAsBase':(False,False)}       #Use sampled sequences as base
+
+        s = self.getBaseSimulation()
+        s.simulate(s, params = params)
+
+        s.plot()
+        s.plotEpitopes()
+
+
+

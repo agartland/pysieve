@@ -1,7 +1,7 @@
 from __future__ import division
 """
 simulation.py
-contains classes for creating sieve datasets
+Classes for generating sieve datasets.
 
 TODO: it would be nice to have a mode that generated Ab-based pressure without needing to load HLA data in anyway.
 I want a oneliner to generate sieve datasets for experimenting with ML methods...
@@ -54,112 +54,88 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from Bio.Alphabet import generic_protein
 import pandas as pd
-#from Queue import Queue,Empty
-#import threading
-from numpy import *
+import numpy as np
 from random import choice
 from numpy.random import permutation, randint
 from copy import deepcopy
 from scipy import stats
+
 from seqplot import *
 from hla_prediction import *
 from discreteSampler import discreteSampler
 
+"""The whole point was to hide the prediction code by going through the hlaPredCache."""
 try:
     import mhc_bindings.mhc_bindings as mb
 except ImportError:
     print 'Could not load mhc_bindings for sequence simulation.'
-    
+
+"""Imports from within the pysieve module."""    
 from data import *
 from sieveio import *
 from za_hla import loadSouthAfricaHLA
 
 __all__ = ['sieveSimulationData',
-          'sieveSimulation',
-          'simSDFromLANL']
+           'sieveSimulation',
+           'simSDFromLANL']
 
 class sieveSimulationData(sieveData):
     """Expanded sieveData class to hold simulation metadata"""
-    hlaAFreq=None
-    hlaBFreq=None
-    simParams=None
-    date=None
+    hlaAFreq = None
+    hlaBFreq = None
+    simParams = None
+    date = None
     """Columns for each sequence: mutations, insertEpitopes"""
-    simDf=None
+    simDf = None
 
 class sieveSimulation(sieveDataMethods):
-    data=None
+    data = None
     
-    def __init__(self,sievedata=sieveSimulationData(),predMethod='netMHCpan',testMode=False):
-        self.data=deepcopy(sievedata)
-        """The Q for doing predictions during the simulation"""
-        #self.requestQ=Queue()
-        self.predMethod=predMethod
-        self.testMode=testMode
+    def __init__(self, sievedata = None, predMethod = 'netMHCpan', testMode = False):
+        if sievedata is None:
+            sieveData = sieveSimulationData()
+        self.data = deepcopy(sievedata)
+        self.predMethod = predMethod
+        self.testMode = testMode
 
-    def startFetcher(self):
-        """Will only need to start the fetcher if its in escape mode"""
-        self.fetcherThread=threading.Thread(target=self.fetcher)
-        self.fetcherThread.daemon=True
-        self.fetcherThread.start()
-
-    def stopFetcher(self):
-        self.requestQ.put(('STOP','STOP','STOP'))
-
-    def fetcher(self):
-        """Centralized predictor thread.
-        From reqQ, gets an HLA allele, a list of peptide variants and an outgoing Q
-        Run all predictions and return the results in a pd.DataFrame() with columns hla, peptide, ic50 and index of ints"""
-        count=1
-        while True:
-            """Effectively a blocking call to get next request"""
-            try:
-                hla,peptides,outQ=self.requestQ.get(block=False,timeout=2)
-                if hla=='STOP':
-                    print 'Fetcher is dying...'
-                    break
-
-                """Do the predictions (they might be slow)"""
-                df=self.predictHLABinding(hla,peptides)
-                outQ.put(df)
-                print 'Fetcher made decision number %d' % count
-                count+=1
-            except Empty:
-                pass
-    def predictHLABinding(self,hla,peptides):
-        """Run all predictions and return the results in a pd.DataFrame()
+    def predictHLABinding(self, hla, peptides):
+        """
+        TODO: call member functions of hlaPredCache to augment the cache instead of direct calls to mb
+        
+        Get predictions for all HLA:peptide pairs and return the results in a pd.DataFrame()
         with columns hla, peptide, ic50 and index of ints
-        Predictions will not be in the same order as requested!
-        Prediction is I/O bound so may be appropriate to put it in a fetcher thread?"""
+        Predictions will not be in the same order as requested!"""
         if not self.testMode:
-            """See if its in the self.ba. If not then get the prediction and add it to self.ba. Pull all results from self.ba"""
-            neededPeptides=[p for p in peptides if not self.ba.has_key((hla.replace('*','_'),p))]
-            if len(neededPeptides)>0:
-                results=mb.fetch_return(methods=[self.predMethod],
-                                        mhc_strs=[hla],
-                                        peptide_strs=neededPeptides,
-                                        peptide_length=9,
-                                        force=True,
-                                        query=False,
-                                        verb=False,
-                                        no_cache=True,
-                                        db_passwd='R1ghtN0w',login='agartlan')
-                addHLAs,addPeptides,addValues=[],[],[]
+            """See if its in the self.ba
+            If not, then get the prediction and add it to self.ba
+            Pull all results from self.ba"""
+            neededPeptides = [p for p in peptides if not self.ba.has_key((hla.replace('*','_'),p))]
+            if len(neededPeptides) > 0:
+                results = mb.fetch_return(methods=[self.predMethod],
+                                            mhc_strs=[hla],
+                                            peptide_strs=neededPeptides,
+                                            peptide_length=9,
+                                            force=True,
+                                            query=False,
+                                            verb=False,
+                                            no_cache=True,
+                                            db_passwd='R1ghtN0w',login='agartlan')
+                addHLAs, addPeptides, addValues = [], [], []
                 for method,hla,pep,core,pred in results:
                     addPeptides.append(pep)
                     addHLAs.append(hla)
                     addValues.append(pred)
-                self.ba.addPredictionValues(addHLAs,addPeptides,addValues)
-            results=[(self.predMethod,hla,p,'CORE',self.ba[(hla,p)]) for p in peptides]
+                self.ba.addPredictionValues(addHLAs, addPeptides, addValues)
+            results=[(self.predMethod, hla, p, 'CORE', self.ba[(hla,p)]) for p in peptides]
         else:
-            results=[('DUMMY',hla,pep,pep,rand()*15) for p in peptides]
+            results = [('DUMMY', hla, pep, pep, rand()*15) for p in peptides]
 
-        d={'hla':[],'peptide':[],'ic50':[]}
+        d = {'hla':[],'peptide':[],'ic50':[]}
         for method,hla,pep,core,pred in results:
             d['hla'].append(hla)
             d['peptide'].append(pep)
             d['ic50'].append(pred)
-        df=pd.DataFrame(d)
+        df = pd.DataFrame(d)
         return df
 
     def simulate(self,sd,params=None,ba=None):
@@ -650,6 +626,7 @@ class sieveSimulation(sieveDataMethods):
                          ha='center',va='center',size='small')
                 counter+=1
         ylim((ylims[0]-lineh*(nRows+1),ylims[1]))
+
 def generateVariants(seq,possibleAA=None):
     """Given peptide seq, return all POSSIBLE single AA mutants OR
     2 random single AA mutants per position in seq
