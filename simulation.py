@@ -52,12 +52,13 @@ from random import choice
 from numpy.random import permutation, randint
 from copy import deepcopy
 from scipy import stats
+import re
 
 import hla_prediction
 from hla_prediction import grabKmer, grabKmerInds
 
 """seqtools is not on github currently"""
-from seqtools import align2mat, fasta2df, padAlignment, consensus
+from seqtools import align2mat, fasta2df, padAlignment, consensus, identifyMindist
 
 """Imports from within the pysieve module."""    
 from data import *
@@ -78,11 +79,9 @@ class sieveSimulationData(sieveData):
     simDf = None
 
 class sieveSimulation(sieveDataMethods):
-    data = None
-    
     def __init__(self, sievedata = None, predMethod = 'netMHCpan', testMode = False):
         if sievedata is None:
-            sieveData = sieveSimulationData()
+            sievedata = sieveSimulationData()
         self.data = deepcopy(sievedata)
         self.predMethod = predMethod
         self.testMode = testMode
@@ -105,7 +104,7 @@ class sieveSimulation(sieveDataMethods):
             resDf = pd.DataFrame(d)
         return resDf
 
-    def simulate(self,sd, params = None, ba = None):
+    def simulate(self, sd, params = None, ba = None):
         """Simulate a sieve dataset based on the sieve data object sd and given params.
         Within the sd the following are required:
             insertSeq
@@ -120,8 +119,11 @@ class sieveSimulation(sieveDataMethods):
         """All params have a vaccine (1) and placebo (0) value (placebo, vaccine)"""
         if params is None:
             raise Exception('No params[] specified!')
+        if not 'epitopeThreshold' in params:
+            params['epitopeThreshold'] = (None,None)
         self.ba = ba
-        self.ba.warn = True
+        if isinstance(ba, hla_prediction.hlaPredCache):
+            self.ba.warn = True
         
         """Take the HLA frequencies from the participants or from specified frequencies in sd.hlaFreq['A']"""
         if not hasattr(sd,'hlaFreq'):
@@ -149,10 +151,10 @@ class sieveSimulation(sieveDataMethods):
 
         """Make a list of possible AA for each site."""
         baseSeqMat = align2mat(baseSeq)
-        possibleAA = [''.join(unique(baseSeqMat[:,coli])).replace('-','') for coli in np.arange(baseSeqMat.shape[1])]
+        possibleAA = [''.join(np.unique(baseSeqMat[:,coli])).replace('-','') for coli in np.arange(baseSeqMat.shape[1])]
         
         """Only sites that have no seqs with a gap and that have more than 1 possible AA are valid epitope indices (ie sites for a mutation)"""
-        #validEpitopeInds = permutation(np.where(~any(baseSeqMat=='-',axis=0) & (array([len(p)>1 for p in possibleAA])))[0])
+        #validEpitopeInds = permutation(np.where(~any(baseSeqMat=='-',axis=0) & (np.array([len(p)>1 for p in possibleAA])))[0])
 
         """All sites that do not have a consensus gap and that have more than 1 possible AA, are possible mutations sites"""
         validEpitopeInds = permutation(np.where(np.array([aa!='-' for aa in sd.insertSeq]) & np.array([len(p)>1 for p in possibleAA]))[0])
@@ -201,10 +203,9 @@ class sieveSimulation(sieveDataMethods):
                                                         validEpitopeInds)
                     if len(epitopeInds) == 0:
                         print 'No epitopes for %s, %s, %s, %s' % tuple(tmpHLA)
-                    else:
-                        if params['escapeMutations'][vaccinated] and np.any([seq[e[2][0]]=='-' for e in epitopes]):
-                            epitopeInds,epitopes = [],[]
-                            """If the first AA of the epitope in the BT is - then find a different epitope"""
+                    elif 'escapeMutations' in params and params['escapeMutations'][vaccinated] and np.any([seq[e[2][0]]=='-' for e in epitopes]):
+                        epitopeInds,epitopes = [],[]
+                        """If the first AA of the epitope in the BT is - then find a different epitope"""
                 """
                 Use binomial dist to first determine how many mutations are to be made.
                 While there are still mutations to be made:
@@ -265,7 +266,7 @@ class sieveSimulation(sieveDataMethods):
                                         sitei = curEpitopeInds[posi]
                                         mutations.append((sitei,seq[sitei],newAA))
                                         print 'For PTID %d, mut %d, chose non-possible %s to %s (%1.2f) as an escape!' % (ptid,mutationsMade+1,curEpitopeSeq,escapeVariant,ic50Df.pred[ind])
-                                        seq = mutateString(seq,sitei,newAA)
+                                        seq = _mutateString(seq,sitei,newAA)
                                         mutationsMade += 1
                                         escapeFound = True
                                 
@@ -278,7 +279,7 @@ class sieveSimulation(sieveDataMethods):
                                 if len(tmpPossibleAA) > 0:
                                     newAA = choice(tmpPossibleAA)
                                     mutations.append((sitei, seq[sitei], newAA))
-                                    seq = mutateString(seq, sitei, newAA)
+                                    seq = _mutateString(seq, sitei, newAA)
                                     mutationsMade += 1
                                     mutationSuccess = True
                                     break
@@ -343,8 +344,8 @@ class sieveSimulation(sieveDataMethods):
         """Plot a map of the simulated mutations and epitopes"""
       
         """Create a matrix of simulated mutations and epitopes (1/0 to indicate mutations relative to base sequence)"""
-        mutMat = zeros((self.data.seqDf.shape[0],len(self.data.insertSeq),))
-        epiMat = zeros((self.data.seqDf.shape[0],len(self.data.insertSeq),))
+        mutMat = np.zeros((self.data.seqDf.shape[0],len(self.data.insertSeq),))
+        epiMat = np.zeros((self.data.seqDf.shape[0],len(self.data.insertSeq),))
         vacInd = []
         plaInd = []
         for ptidi,(ptid,rec) in enumerate(self.data.simDf.iterrows()):
@@ -536,7 +537,7 @@ class sieveSimulation(sieveDataMethods):
         """I may have broke something here. I'm not sure why the HXB2 coord is required to be a str?
         I think we want them to not be null..."""
         #nani=hxb2Labels.map(lambda x: type(x) is str or type(x))
-        nani = hxb2Labels.map(lambda x: type(x) is str or ~isnan(x))
+        nani = hxb2Labels.map(lambda x: type(x) is str or ~np.isnan(x))
         xt = xt[nani]
         xtl = hxb2Labels.dropna()
         skip = int(ceil(len(xt)/maxTicks))
@@ -571,7 +572,7 @@ def _generateVariants(seq, possibleAA = None):
     """Given peptide seq, return all POSSIBLE single AA mutants OR
     2 random single AA mutants per position in seq
     Return a list of variants and a dictionary of variants:(posi,newAA)"""
-    variantsInfo = {seq:(nan,'ORIGINAL')}
+    variantsInfo = {seq:(np.nan,'ORIGINAL')}
     """If we know possibleAA then return all possible variants,
     else return 2 random single-mut variant per position"""
     if not possibleAA is None:
@@ -585,7 +586,7 @@ def _generateVariants(seq, possibleAA = None):
         for posi in xrange(len(seq)):
             for i in xrange(2):
                 newAA = choice(hla_prediction.AALPHABET.replace(seq[posi],''))
-                tmpVariant = mutateString(seq,posi,newAA)
+                tmpVariant = _mutateString(seq,posi,newAA)
                 variantsInfo[tmpVariant] = (posi,newAA)
     return variantsInfo
 
@@ -619,12 +620,12 @@ def _pickEpitopes(seq, btSeq, N, bindingThreshold, ba, hla, validEpitopeInds):
     
     """If nEptopes is 0 then pick sites at random"""
     if N < 1:
-        epitopes = [('NonEpitope',seq[i],array([i]),nan) for i in permutation(validEpitopeInds)]
+        epitopes = [('NonEpitope',seq[i],np.array([i]),np.nan) for i in permutation(validEpitopeInds)]
         inds = [e[2][0] for e in epitopes]
         return inds, epitopes
 
     if bindingThreshold is None:
-        epitopes = [('Ab',seq[i],array([i]),nan) for i in validEpitopeInds[:(N*9)]]
+        epitopes = [('Ab',seq[i],np.array([i]),np.nan) for i in validEpitopeInds[:(N*9)]]
         inds = []
         for e in epitopes:
             inds += list(e[2])
@@ -712,12 +713,12 @@ def simSDFromLANL(alignmentsPath, protein, year, hlaFreq, clade = None, country 
     sd.seqDf = lanlDf[['seq']]
     sd.ptidDf = lanlDf[['vaccinated','infected']]
     
-    """Use consensus or mindist for teh insert sequence"""
+    """Use consensus or mindist for the insert sequence"""
     #sd.insertSeq = consensus(sd.seqDf.seq)
-    sd.insertSeq = identifyMindist(sd.seqDf.seq, ignoreGaps=False)
+    sd.insertSeq = identifyMindist(sd.seqDf.seq, ignoreGaps = False)
     
     """Set up mapDf"""
-    sd.mapDf = pd.DataFrame(zeros((len(sd.insertSeq),1),dtype=np.int32),columns=['posNum'])
+    sd.mapDf = pd.DataFrame(np.zeros((len(sd.insertSeq),1),dtype=np.int32),columns=['posNum'])
     sd.mapDf.posNum = np.arange(len(sd.insertSeq))
     sd.mapDf['hxb2AA'] = np.array([aa for aa in sd.HXB2],dtype='S1')
     sd.mapDf['hxb2Pos'] = np.array(['' for aa in sd.HXB2],dtype=object)
