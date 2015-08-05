@@ -28,50 +28,26 @@ TODO:
 """
 
 __all__=['simulationMeta',
+         'analysisMeta',
          'siteMeta',
          'loadGlobalPvalues',
          'plotPRByP',
          'plotFPR',
          'plotPRatP']
 
-class simulationMeta(object):
-    def __init__(self, dataPath, simName, basedata=None, baseparams=None, metadata=None):
+class analysisMeta(baseMeta):
+    """Class for organizing, saving/loading analyses (single method) of a simulationMeta object"""
+    def __init__(self, dataPath, meta, analysisMethodClass):
         self.dataPath = dataPath
-        self.simName = simName
-        self.basedata = basedata
-        self.baseparams = baseparams
-        if not metadata is None:
-            self.resDf = metadata
-    def runSimulations(self, varyParams, ba, nreps = 1):
-        """Run a set of simulations varying the parameters over the specified ranges and storing the results in self.resDf"""
-        res = {'simID':[],'sim':[],'params':[],'rep':[]}
-        res.update({vp:[] for vp in varyParams.keys()})
-        
-        """Add a parameter 'rep' for repeating the same simulation multiple times"""
-        varyParams.update({'rep':arange(nreps)})
-        vpKeys = varyParams.keys()
+        self.simName = meta.simName
+        self.resDf = pd.DataFrame(np.empty((meta.shape[0],3)), dtype = object), columns = ['pvalue','observed','res'], index = meta.index)
+        self.metaDf meta
+        self.analysisMethodClass = analysisMethodClass
+        self.analysisName = analysisMethodClass(None).methodName
+        self.checkDirs()
+        self.save()
 
-        """Initialize self.resDf with parameters and empty sieve simulation objects"""
-        for i,val in enumerate(multi_for([varyParams[k] for k in vpKeys])):
-            res['simID'].append(i)
-            params = deepcopy(self.baseparams)
-            for ki,k in enumerate(vpKeys):
-                params.update({k:val[ki]})
-                res[k].append(val[ki])
-            res['params'].append(params)
-            s = sieveSimulation()
-            res['sim'].append(s)
-        self.resDf = pd.DataFrame(res)
-
-        """Simulate and save as you go to conserve memory"""
-        for sid in self.resDf.index:
-            if sid % round(self.resDf.shape[0]/20) == 0:
-                print "Simulation %d of %d" % (sid,self.resDf.shape[0])
-                sys.stdout.flush()
-            self.resDf.sim.loc[sid].simulate(self.basedata, params = self.resDf.params.loc[sid], ba = ba)
-            self.subSave(sid)
-            
-    def runAnalyses(self, analysisMethodClass, nperms, params = {}, distFilter = None, ba = None, clusterClient = None):
+    def runAnalyses(self, nperms, params = {}, distFilter = None, ba = None, clusterClient = None):
         """Run an analysis method on all the simulations, storing the results in resDf"""
         if not 'thinPermutations' in params:
             thinPermutations = 1000
@@ -82,27 +58,19 @@ class simulationMeta(object):
         else:
             ditchDist = params['ditchDist']
 
-        self.analysisName = analysisMethodClass(None).methodName
-        self.checkDirs()
-
         """Print progress to a file and to the screen"""
-        with open(self.dataPath + 'sievesim/%s/%s.log' % (self.simName,self.analysisName),'w') as logFh:
-            msg = 'Running %d combinations of %d parameters' % (self.resDf.shape[0],self.resDf.shape[1]-4)
+        with open(self.dataPath + 'sievesim/%s/%s.log' % (self.simName, self.analysisName), 'w') as logFh:
+            msg = 'Running %d combinations of %d parameters' % (self.resDf.shape[0], self.resDf.shape[1] - 4)
             print msg,
             logFh.write('Starting: %s\n' % time.asctime())
-            logFh.write(msg+'\n')
+            logFh.write(msg + '\n')
 
-            self.resDf['pvalue'] = np.empty(self.resDf.shape[0], dtype = object)
-            self.resDf['observed'] = np.empty(self.resDf.shape[0], dtype = object)
-            self.resDf['res'] = np.empty(self.resDf.shape[0], dtype = object)
-            self.save()
-           
             startTime = time.time()
             for simID in self.resDf.index:
                 """Load one simulation for analysis at a time (this clears out old ones as well)"""
                 self.subLoad(simID, self.analysisName)
 
-                tmp = analysisMethodClass(sievedata = self.resDf.sim[simID].data)
+                tmp = analysisMethodClass(sievedata = self.metaDf.sim[simID].data)
                 tmp.initialize(ba = ba, params = params)
                 tmp.computeDistance()
                 tmp.computeObserved(distFilter = distFilter)
@@ -120,112 +88,97 @@ class simulationMeta(object):
                     logFh.flush()
             print 'done!'
             logFh.write('Finished: %s\n' % time.asctime())
-    def getResFn(self, simID):
-        """Used by load and save to define names of result files
-           Does not include DATA_PATH so that files can be moved"""
-        if hasattr(self, 'analysisName'):
-            aName = self.analysisName
-        else:
-            aName = 'sim'
-        basedir = 'sievesim/%s/%s/' % (self.simName,aName)
-        return basedir+'%s.%d.pkl' % (aName,simID)
-    def getDataFn(self,simID):
-        """Used by load and save to define names of data files"""
-        basedir = 'sievesim/%s/data/' % (self.simName)
-        return basedir+'simdata.%d.pkl' % (simID)
+    def getRelativeDir(self):
+        return '%s/%s/' % (self.simName, self.analysisName)
+    def getRelativePath(self, simID):
+        """Used by load and save to define names of result files"""
+        return self.getRelativeDir() + '%s.%d.pkl' % (self.analysisName, simID)
+    def getAbsPath(self, simID):
+        return self.dataPath + self.getRelativePath(simID)
+    def getAbsDir(self, simID):
+        return self.dataPath + self.getRelativeDir()
     def checkDirs(self):
         """Creates the needed subdirectories if they do not exist"""
-        if hasattr(self,'analysisName'):
-            basedir = self.dataPath + 'sievesim/%s/%s/' % (self.simName,self.analysisName)
-            if not os.path.exists(basedir):
-                os.makedirs(basedir)
-        datadir = self.dataPath + 'sievesim/%s/data/' % (self.simName)
-        if not os.path.exists(datadir):
-            os.makedirs(datadir)
-    def writeObject(self,obj,relativeFn):
-        """Made this a separate function so that later I can switch from pickle easily
-           It's also the only place that needs the absolute path (ie DATA_PATH)"""
-        with open(self.dataPath + relativeFn,'wb') as fh:
+        if not os.path.exists(self.getAbsDir()):
+            os.makedirs(self.getAbsDir())
+    def writeObject(self, obj, fn, relative = False):
+        """Made this a separate function so that later I can switch from pickle easily"""
+        if relative:
+            absFn = self.dataPath + fn
+        else:
+            absFn = fn
+
+        with open(absFn, 'wb') as fh:
             pickle.dump(obj,fh)
-    def readObject(self,fn,relative=True):
-        """Made this a separate function so that later I can switch from pickle easily
-           It's also the only place that needs the absolute path (ie DATA_PATH)"""
+    def readObject(self, fn, relative = True):
+        """Made this a separate function so that later I can switch from pickle easily"""
         """Fn can be relative or absolute"""
         if relative:
             absFn = self.dataPath + fn
         else:
             absFn = fn
 
+        """Need to use the pandas function so that DataFrames are read correctly"""
         obj = pd.read_pickle(absFn)
         return obj
 
-    def translateResDf2Links(self):
-        """Return a dict with a copy of self.resDf that contains only links to data files instead of the data"""
-        outDict = {'basedata':self.basedata,
-                   'baseparams':self.baseparams}
-
-        """Preserve the obj so make a deepcopy of the minimal data"""
-        columns = self.resDf.columns.drop(['sim'])
-        if 'res' in columns:
-            columns = columns.drop(['res'])    
-        outDict.update({'resDf':deepcopy(self.resDf[columns])})
-
-        """Replace objects with filenames"""
-        outDict['resDf']['sim'] = outDict['resDf'].simID.map(lambda x: self.getDataFn(x))
-        if 'res' in self.resDf.columns:
-            outDict['resDf']['res'] = outDict['resDf'].simID.map(lambda x: self.getResFn(x))
-        return outDict
-
-    def subSave(self, simID, thinPermutations = 1000, ditchDist = True):
-        """Saves the data file and the analysis file underlying a single simulation simID to save space
-           The operation replaces the object with a string to the file containing the object
-           Both this function and the save function checks to make sure you are not trying to save
-           a data file or an results object that is already merely a link"""
+    def saveMetaPkl():
         self.checkDirs()
-        outDict=self.translateResDf2Links()
+
+        """dict with a copy of self.resDf that contains only links to data files instead of the data"""
+        columns = [c for c in self.resDf.columns if not c in ['res']]
+        outDict = {'resDf':deepcopy(self.resDf[columns])}
+
+        """Replace objects with relative filenames"""
+        outDict['resDf']['res'] = outDict['resDf'].simID.map(lambda x: self.getRelativePath(x))
 
         """It's always safe to save this file since it should never contain data, just paths to files
            (though sometimes these data files will not exist yet at these paths (sloppy maybe?)"""
-        if hasattr(self,'analysisName'):
-            self.writeObject(outDict, 'sievesim/%s/%s.%s.meta.pkl' % (self.simName,self.simName,self.analysisName))
-        else:
-            self.writeObject(outDict, 'sievesim/%s/%s.sim.meta.pkl' % (self.simName,self.simName))
-
-        """Save the data to a file, if its an object and not just a string indicating the path to a file
-           And erase res and sim fields from the object in memory"""
-        if not type(self.resDf.sim[simID]) == str:
-            self.writeObject(self.resDf.sim[simID], outDict['resDf'].sim[simID])
-            """Assign the object a filename link, after a successful write"""
-            self.resDf.sim[simID] = outDict['resDf'].sim[simID]
-
-        """If this is a meta object with results and the results aren't just a link, then save them"""
-        if ('res' in self.resDf.columns) and (not type(self.resDf.res[simID]) is str):
-            """Replace data attrib in analysisObj with filename too"""
-            self.resDf.res[simID].data=outDict['resDf'].sim[simID]
-            
-            """Set these attributes to None if they exist. Optionally ditch filteredDist and scannedDist too"""
-            remove = ['btBA','insertBA','distFilter','dist','temp']
-
-            if ditchDist:
-                remove += ['filteredDist','scannedDist']
+        self.writeObject(outDict, '%s/%s/%s.%s.meta.pkl' % (self.dataPath, self.simName, self.simName, self.analysisName))
+    
+    def _saveOne(self, simID, thinPermutations, ditchDist, preservObject = True):
+        if not type(self.resDf.res[simID]) is str:
+            if preserveObject:
+                tmp = deepcopy(self.resDf.res.loc[simID])
             else:
-                """If don't ditch dist then keep only one of filteredDist or scannedDist depending on which exists"""
-                if hasattr(self.resDf.res[simID].results,'scannedDist'):
-                    remove += ['filteredDist']
-            
-            for o in remove:
-                try:
-                    setattr(self.resDf.res[simID].results,o,None)
-                except AttributeError:
-                    pass
+                """Replace data attrib in analysisObj with filename too"""
+                self.resDf.res.loc[simID].data = self.metaDf.getRelativePath(simID)
+                
+                """Set these attributes to None if they exist. Optionally ditch filteredDist and scannedDist too"""
+                remove = ['btBA','insertBA','distFilter','dist','temp']
 
-            if not thinPermutations is None:
-                self.resDf.res[simID].thinPermutations(thinPermutations)
+                if ditchDist:
+                    remove += ['filteredDist','scannedDist']
+                else:
+                    """If don't ditch dist then keep only one of filteredDist or scannedDist depending on which exists"""
+                    if hasattr(self.resDf.res[simID].results, 'scannedDist'):
+                        remove += ['filteredDist']
+                
+                for o in remove:
+                    try:
+                        setattr(self.resDf.res.loc[simID].results, o, None)
+                    except AttributeError:
+                        pass
+
+                if not thinPermutations is None:
+                    self.resDf.res.loc[simID].thinPermutations(thinPermutations)
+
+                tmp = self.resDf.res.loc[simID]
             
             """Save the results to a file"""
-            self.writeObject(self.resDf.res[simID], outDict['resDf'].res[simID])
-            """Assign the object a filename link"""
-            self.resDf.res[simID] = outDict['resDf'].res[simID]
+            self.writeObject(tmp, self.getRelativePath(simID))
+            
+            if not preserveObject:
+                """Assign the object a filename link"""
+                self.resDf.res.loc[simID] = self.getRelativePath(simID)
+
+    def subSave(self, simID, thinPermutations = 1000, ditchDist = True):
+        """Saves the analysis file underlying a single simulation simID to save space
+           The operation replaces the object with a string to the file containing the object
+           Both this function and the save function checks to make sure you are not trying to save
+           a results object that is already merely a link."""
+        self.saveMetaPkl()
+        self._saveOne(simID, thinPermutations, ditchDist)
 
     def save(self, thinPermutations = 1000, ditchDist = True):
         """
@@ -237,107 +190,215 @@ class simulationMeta(object):
         (leaving the existing resDf intact. if memory becomes a problem it could be the need for a deepcopy
             most of the time if we are ditching things for the file then we can probably ditch for the obj too?)
         """
-        self.checkDirs()
+        self.saveMetaPkl()
 
-        """Get a copy of resDf with sim and res fields replaced with links"""
-        outDict = self.translateResDf2Links()
-
-        """It's always safe to save this file since it should never contain data, just paths to files"""
-        if hasattr(self,'analysisName'):
-            self.writeObject(outDict, 'sievesim/%s/%s.%s.meta.pkl' % (self.simName,self.simName,self.analysisName))
-        else:
-            self.writeObject(outDict, 'sievesim/%s/%s.sim.meta.pkl' % (self.simName,self.simName))
-
-        """Go through each simulation and save the file, preserving the object in memory though"""
-        for ind in self.resDf.index:
-            """Save the data to a file, if its an object and not just a string indicating the path to a file"""
-            if not type(self.resDf.sim[ind]) == str:
-                self.writeObject(self.resDf.sim[ind], outDict['resDf'].sim[ind])
-
-            """If this is a meta object with results and the results aren't just a link, then save them"""
-            if ('res' in self.resDf.columns) and (not type(self.resDf.res[ind]) is str) and (not self.resDf.res[ind] is None):
-                s=deepcopy(self.resDf.res[ind])
-
-                """Replace data attrib in analysisObj with filename too"""
-                s.data = outDict['resDf'].sim[ind]
-                
-                if ditchDist:
-                    s.results.dist = None
-                    s.results.filteredDist = None
-
-                if not thinPermutations is None:
-                    s.thinPermutations(thinPermutations)
-                
-                """Save the results to a file"""
-                self.writeObject(s, outDict['resDf'].res[ind])
-
-    def loadFirst(self, fn, relative = False):
-        """Load a pickled set of simulations from a file fn into the existing class object
-        (populating basedata, base params and resDf)"""
-
-        tmp = self.readObject(fn, relative = relative)
-        self.basedata = tmp['basedata']
-        self.baseparams = tmp['baseparams']
-        self.resDf = tmp['resDf']
+        """Go through each analysis and save the file, preserving the object in memory though"""
+        for simID in self.resDf.index:
+            self._saveOne(simID, thinPermutations, ditchDist)
 
     def loadMetaPkl(self, analysisName):
-        self.loadFirst('sievesim/%s/%s.%s.meta.pkl' % (self.simName, self.simName, analysisName), relative = True)
-        """This means you can overwrite the analysis name by renaming files and putting them in a new location"""
+        self.resDf = self.readObject('%s/%s.%s.meta.pkl' % (self.simName, self.simName, analysisName), relative = True)['resDf']
         self.analysisName = analysisName
+    def _loadOne(self, sid, deferResults, deferData):
+        if not deferResults and type(self.resDf.res[sid]) is str:
+            fullPath = self.dataPath + self.resDf.res.loc[sid]
+            try:
+            
+                self.resDf.res.loc[sid] = pd.read_pickle(fullPath)
+            except IOError:
+                raise IOError('Result file does not exist: %s' % fullPath)
 
-    def load(self, analysisName, deferData = False, deferResults = False):
+        if not deferData and type(self.resDf.res[sid].data) is str:
+            fullPath = self.dataPath + self.resDf.res.loc[sid].data
+            try:
+                """Load the data with the relative path"""
+                self.resDf.res.loc[ind].data = pd.read_pickle(fullPath)
+            except IOError:
+                raise IOError('Data file does not exist: %s' % fullPath)
+
+    def load(self, analysisName, deferResults = True, deferData = True):
         """Load pickled simulation meta object and then the sieveData and sieveResults objects from the paths in resDf.sim and resDf.res
-        If deferData or deferResults then only load the meta object as self.resDf but leave paths for data/results"""
+        If deferData or deferResults then only load the meta object as self.metaDf but leave paths for data/results"""
 
-        """Load a pickled set of simulations and results from the simName and analysisName"""
+        """Load a pickled set of results from the simName and analysisName"""
         self.loadMetaPkl(analysisName)
 
-        """Use the paths in the sim and res columns to load the sim data and results into the df"""
+        """Use the paths res columns to load the results into the df"""
         for ind in self.resDf.index:
-            if not deferData and type(self.resDf.sim[ind]) is str:
-                self.resDf.sim.loc[ind] = pd.read_pickle(self.dataPath + self.resDf.sim[ind])
-            if not deferData and not deferResults and 'res' in self.resDf.columns and type(self.resDf.res[ind]) is str:
-                self.resDf.res.loc[ind] = pd.read_pickle(self.dataPath + self.resDf.res[ind])
-                self.resDf.res.loc[ind].data = self.resDf.sim[ind].data
+            self._loadOne(ind, deferResults, deferData)
 
-    def subLoad(self, simIDs, analysisName):
+    def subLoad(self, simIDs, analysisName, deferResults = True, deferData = True):
         """Loads in the data and the results (if they exist) for a set of simulations,
            replacing the link with the actual object in resDf.
            This also replaces the old resDf object, freeing space taken by other simulations."""
-
         if type(simIDs) is int:
             simIDs = [simIDs]
         
         self.loadMetaPkl(analysisName)
 
         for sid in simIDs:
-            fullPath = self.dataPath + self.resDf.sim.loc[simID]
-            
-            if type(self.resDf.sim[simID]) is str:
-                """Can only load this sim if its a link and not the actual object"""
-                try:
-                    self.resDf.sim.loc[simID] = pd.read_pickle(fullPath)
-                except IOError:
-                    """If the data file or result file doesn't exist"""
-                    raise IOError('Simulation data file does not exist: %s' % fullPath)
+            self._loadOne(sid, deferResults, deferData)
 
-            if 'res' in self.resDf.columns:
-                fullPath = self.dataPath + self.resDf.res.loc[simID]
-                if type(self.resDf.res[simID]) is str:
-                    """Can only load this result if its a link and not the actual object"""
-                    try:
-                        self.resDf.res.loc[simID] = pd.read_pickle(fullPath)
-                        self.resDf.res.loc[simID].data = self.resDf.sim[simID].data
-                    except IOError:
-                        raise IOError('Result file does not exist: %s' % fullPath)
+    def eval(self, simID, evalClass = siteEval):
+        """Returns an eval object for a particular analysis
+        TODO: should this file make sure that the analysis and data is loaded (not a string)?"""
+        return evalClass(self.resDf.res.loc[simID].data, self.resDf.res.loc[simID].results)
+
+class simulationMeta(object):
+    """Class for organizing, saving/loading a large number of simulations"""
+    def __init__(self, dataPath, simName, basedata = None, baseparams = None, metadata = None):
+        self.dataPath = dataPath
+        self.simName = simName
+        self.basedata = basedata
+        self.baseparams = baseparams
+        if not metadata is None:
+            self.metaDf = metadata
+    def runSimulations(self, varyParams, ba = None, nreps = 1):
+        """Run a set of simulations varying the parameters over the specified ranges and storing the results in self.metaDf"""
+        res = {'simID':[],'sim':[],'params':[],'rep':[]}
+        res.update({vp:[] for vp in varyParams.keys()})
+        
+        """Add a parameter 'rep' for repeating the same simulation multiple times"""
+        varyParams.update({'rep':arange(nreps)})
+        vpKeys = varyParams.keys()
+
+        """Initialize self.metaDf with parameters and empty sieve simulation objects"""
+        for i,val in enumerate(multi_for([varyParams[k] for k in vpKeys])):
+            res['simID'].append(i)
+            params = deepcopy(self.baseparams)
+            for ki,k in enumerate(vpKeys):
+                params.update({k:val[ki]})
+                res[k].append(val[ki])
+            res['params'].append(params)
+            s = sieveSimulation()
+            res['sim'].append(s)
+        self.metaDf = pd.DataFrame(res)
+
+        """Simulate and save as you go to conserve memory"""
+        for sid in self.metaDf.index:
+            if sid % round(self.metaDf.shape[0]/20) == 0:
+                print "Simulation %d of %d" % (sid, self.metaDf.shape[0])
+                sys.stdout.flush()
+            self.metaDf.sim.loc[sid].simulate(self.basedata, params = self.metaDf.params.loc[sid], ba = ba)
+            self.subSave(sid)
+    def getRelativeDir(self):
+        return '%s/data/' % (self.simName)
+    def getRelativePath(self, simID):
+        """Used by load and save to define names of result files"""
+        return self.getRelativeDir() + 'simdata.%d.pkl' % (simID)
+    def getAbsPath(self, simID):
+        return self.dataPath + self.getRelativePath(simID)
+    def getAbsDir(self, simID):
+        return self.dataPath + self.getRelativeDir()
+    def checkDirs(self):
+        """Creates the needed subdirectories if they do not exist"""
+        if not os.path.exists(self.getAbsDir()):
+            os.makedirs(self.getAbsDir())
+    def writeObject(self, obj, fn, relative = False):
+        """Made this a separate function so that later I can switch from pickle easily"""
+        if relative:
+            absFn = self.dataPath + fn
+        else:
+            absFn = fn
+
+        with open(absFn, 'wb') as fh:
+            pickle.dump(obj,fh)
+    def readObject(self, fn, relative = True):
+        """Made this a separate function so that later I can switch from pickle easily"""
+        """Fn can be relative or absolute"""
+        if relative:
+            absFn = self.dataPath + fn
+        else:
+            absFn = fn
+
+        """Need to use the pandas function so that DataFrames are read correctly"""
+        obj = pd.read_pickle(absFn)
+        return obj
+
+    def saveMetaPkl():
+        self.checkDirs()
+
+        """dict with a copy of self.resDf that contains only links to data files instead of the data"""
+        outDict = {'basedata': self.basedata,
+                   'baseparams': self.baseparams}
+
+        """Preserve the obj so make a deepcopy of the minimal data"""
+        columns = [c for c in self.metaDf.columns if not c in ['sim']]
+        outDict.update({'metaDf':deepcopy(self.metaDf[columns])})
+
+        """Replace objects with relative filenames"""
+        outDict['metaDf']['sim'] = outDict['metaDf'].simID.map(lambda x: self.getRelativePath(x))
+
+        """It's always safe to save this file since it should never contain data, just paths to files
+           (though sometimes these data files will not exist yet at these paths (sloppy maybe?)"""
+        self.writeObject(outDict, '%s/%s/%s.sim.meta.pkl' % (self.dataPath, self.simName, self.simName))
+
+    def _saveOne(self, simID, preserveObject = True):
+        """Save the data to a file"""
+        self.writeObject(self.metaDf.sim.loc[simID], self.getRelativePath(simID))
+        if not preserveObject:
+            """Assign the object a filename link"""
+            self.metaDf.sim[simID] = self.getRelativePath(simID)
+
+    def subSave(self, simID, preserveObject = False):
+        """Saves the analysis file underlying a single simulation simID to save space
+           The operation replaces the object with a string to the file containing the object
+           Both this function and the save function checks to make sure you are not trying to save
+           a results object that is already merely a link."""
+        self.saveMetaPkl()
+        self._saveOne(simID, preserveObject)
+
+    def save(self):
+        self.saveMetaPkl()
+
+        """Go through each data file and save it, preserving the object in memory though"""
+        for simID in self.resDf.index:
+            self._saveOne(simID, preserveObject = True)
+    def loadMetaPkl(self, analysisName):
+        tmp = self.readObject('sievesim/%s/%s.%s.meta.pkl' % (self.simName, self.simName, analysisName), relative = True)
+        self.basedata = tmp['basedata']
+        self.baseparams = tmp['baseparams']
+        self.metaDf = tmp['metaDf']
+
+    def _loadOne(self, sid, deferData):
+        if not deferData and type(self.metaDf.sim[sid].data) is str:
+            fullPath = self.dataPath + self.metaDf.sim.loc[sid].data
+            try:
+                """Load the data with the relative path"""
+                self.metaDf.sim.loc[ind].data = pd.read_pickle(fullPath)
+            except IOError:
+                raise IOError('Data file does not exist: %s' % fullPath)
+
+    def load(self, deferData = False):
+        """Load pickled simulation meta object and then the sieveData and sieveResults objects from the paths in resDf.sim and resDf.res
+        If deferData or deferResults then only load the meta object as self.metaDf but leave paths for data/results"""
+
+        """Load a pickled set of results from the simName and analysisName"""
+        self.loadMetaPkl()
+
+        """Use the paths res columns to load the results into the df"""
+        for ind in self.metaDf.index:
+            self._loadOne(ind, deferData = deferData)
+
+    def subLoad(self, simIDs, deferData = False):
+        """Loads in the data and the results (if they exist) for a set of simulations,
+           replacing the link with the actual object in resDf.
+           This also replaces the old resDf object, freeing space taken by other simulations."""
+        if type(simIDs) is int:
+            simIDs = [simIDs]
+        
+        self.loadMetaPkl()
+
+        for sid in simIDs:
+            self._loadOne(sid, deferData = deferData)  
 
     def to_mers(self, fn = None, nmers = [9]):
         """Output all mers in all sequences in all simulations to a mers file for HLA predictions"""
         mers = set()
-        for sid in self.resDf.index:
-            if type(self.resDf.sim.loc[sid]) is str:
+        for sid in self.metaDf.index:
+            if type(self.metaDf.sim.loc[sid]) is str:
                 self.subLoad(sid,self.analysisName)
-            s = self.resDf.sim.loc[sid]
+            s = self.metaDf.sim.loc[sid]
             mers.update(set(s.to_mers(nmers = nmers, returnList = True)))
         mers = sorted(list(mers))
         if not fn is None:
@@ -349,10 +410,10 @@ class simulationMeta(object):
     def to_hla(self, fn = None):
         """Output all HLA alleles from every participant in every simulation to a file for HLA predictions"""
         hlas = set()
-        for sid in self.resDf.index:
-            if type(self.resDf.sim.loc[sid]) is str:
+        for sid in self.metaDf.index:
+            if type(self.metaDf.sim.loc[sid]) is str:
                 self.subLoad(sid,self.analysisName)
-            s=self.resDf.sim.loc[sid]
+            s=self.metaDf.sim.loc[sid]
             hlas.update(set(s.to_hla(returnList=True)))
         hlas = sorted(list(hlas))
         if not fn is None:
@@ -364,15 +425,13 @@ class simulationMeta(object):
     def saveSimPlots(self, basePath = None):
         if basePath is None:
             basePath = self.dataPath + 'sievesim/figures/'
-        for simID,rec in self.resDf.iterrows():
+        for simID,rec in self.metaDf.iterrows():
             figure(1)
             rec['sim'].plotEpitopes()
             savefig(basePath + '%d_sim_epitopes.png' % simID, dpi = 200)
             
             rec['sim'].plot()
             savefig(basePath + '%d_sim.png' % simID, dpi = 200)
-    def eval(self, simID, evalClass = siteEval):
-        return evalClass(self.resDf.sim[simID].data, self.resDf.res[simID].results)
 
 class siteMeta(simulationMeta):
     """
