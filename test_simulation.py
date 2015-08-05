@@ -3,7 +3,7 @@ import numpy as np
 
 from simulation import *
 from za_hla import loadSouthAfricaHLA
-from hla_prediction import hlaPredCache
+from HLAPredCache import hlaPredCache
 
 import ipdb
 

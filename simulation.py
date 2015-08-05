@@ -54,8 +54,8 @@ from copy import deepcopy
 from scipy import stats
 import re
 
-import hla_prediction
-from hla_prediction import grabKmer, grabKmerInds
+import HLAPredCache
+from HLAPredCache import grabKmer, grabKmerInds
 
 """seqtools is not on github currently"""
 from seqtools import align2mat, fasta2df, padAlignment, consensus, identifyMindist
@@ -92,7 +92,7 @@ class sieveSimulation(sieveDataMethods):
         Predictions will not be in the same order as requested!"""
         if not self.testMode:
             #self.ba.addPredictions(self.predMethod, [hla], peptides)
-            resDf = hla_prediction.predict.iedbPredict(method,hlas,peptides)
+            resDf = HLAPredCache.predict.iedbPredict(method,hlas,peptides)
         else:
             results = [('DUMMY', hla, pep, pep, rand()*15) for p in peptides]
 
@@ -122,7 +122,7 @@ class sieveSimulation(sieveDataMethods):
         if not 'epitopeThreshold' in params:
             params['epitopeThreshold'] = (None,None)
         self.ba = ba
-        if isinstance(ba, hla_prediction.hlaPredCache):
+        if isinstance(ba, HLAPredCache.hlaPredCache):
             self.ba.warn = True
         
         """Take the HLA frequencies from the participants or from specified frequencies in sd.hlaFreq['A']"""
@@ -226,7 +226,7 @@ class sieveSimulation(sieveDataMethods):
                         """Pull the actual peptide from seq (not the insert epitope)"""
                         curEpitopeSeq = grabKmer(seq, curEpitope[2][0], k = len(curEpitope[2]))[1]
                         curEpitopeInds = grabKmerInds(seq, curEpitope[2][0], k = len(curEpitope[2]))[1]
-                        if params['escapeMutations'][vaccinated]:
+                        if 'escapeMutations' in params and params['escapeMutations'][vaccinated]:
                             """Try all POSSIBLE single AA mutations"""
                             #print 'For PTID %d, mut %d, epitope (%s,%d-%s,%1.2f) tried variants of BT %s:' % (ptid,mutationsMade+1,curEpitope[0],curEpitope[2][0],curEpitope[1],curEpitope[3],curEpitopeSeq)
                             
@@ -585,7 +585,7 @@ def _generateVariants(seq, possibleAA = None):
     else:
         for posi in xrange(len(seq)):
             for i in xrange(2):
-                newAA = choice(hla_prediction.AALPHABET.replace(seq[posi],''))
+                newAA = choice(HLAPredCache.AALPHABET.replace(seq[posi],''))
                 tmpVariant = _mutateString(seq,posi,newAA)
                 variantsInfo[tmpVariant] = (posi,newAA)
     return variantsInfo
@@ -694,7 +694,7 @@ def simSDFromLANL(alignmentsPath, protein, year, hlaFreq, clade = None, country 
     if not country is None:
         lanlDf = lanlDf.ix[lanlDf.country == country]
     for ind in lanlDf.index:
-        lanlDf.seq[ind] = re.sub('[%s]' % hla_prediction.BADAA,'-',lanlDf.seq[ind])
+        lanlDf.seq[ind] = re.sub('[%s]' % HLAPredCache.BADAA,'-',lanlDf.seq[ind])
     lanlDf.seq = padAlignment(lanlDf.seq)
 
     """Remove any sequences that have a gap at the positions that only have 1, 2 or 3 gaps.

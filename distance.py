@@ -32,7 +32,7 @@ from numpy import *
 import pandas as pd
 import itertools
 from nanfunctions import *
-from hla_prediction import *
+from HLAPredCache import *
 
 __all__=['_vxmatch_distance',
          '_binding_escape_distance',

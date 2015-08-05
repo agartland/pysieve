@@ -21,7 +21,7 @@ from Bio.SeqRecord import SeqRecord
 from Bio.Alphabet import Gapped, IUPAC
 from Bio.SubsMat.MatrixInfo import blosum90, ident
 #from seqtools import *
-#from hla_prediction import *
+#from HLAPredCache import *
 
 class sieveData(object):
     masterFn = None
