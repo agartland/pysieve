@@ -92,7 +92,7 @@ class sieveSimulation(sieveDataMethods):
         Predictions will not be in the same order as requested!"""
         if not self.testMode:
             #self.ba.addPredictions(self.predMethod, [hla], peptides)
-            resDf = HLAPredCache.predict.iedbPredict(method,hlas,peptides)
+            resDf = HLAPredCache.predict.iedbPredict(self.predMethod, [hla], peptides)
         else:
             results = [('DUMMY', hla, pep, pep, rand()*15) for p in peptides]
 
@@ -120,10 +120,15 @@ class sieveSimulation(sieveDataMethods):
         if params is None:
             raise Exception('No params[] specified!')
         if not 'epitopeThreshold' in params:
+            """Make non-contiguous Ab epitopes by default"""
             params['epitopeThreshold'] = (None,None)
+
         self.ba = ba
+
         if isinstance(ba, HLAPredCache.hlaPredCache):
             self.ba.warn = True
+        elif not (params['epitopeThreshold'][0] is None and params['epitopeThreshold'][1] is None):
+            raise ValueError('HLAPredCache is None for T-cell epitope simulation')
         
         """Take the HLA frequencies from the participants or from specified frequencies in sd.hlaFreq['A']"""
         if not hasattr(sd,'hlaFreq'):
@@ -618,7 +623,7 @@ def _pickEpitopes(seq, btSeq, N, bindingThreshold, ba, hla, validEpitopeInds):
     Pick N*9 sites based on the Brumme et al. HLA-associated sites
     """
     
-    """If nEptopes is 0 then pick sites at random"""
+    """If nEpitopes is 0 then pick sites at random"""
     if N < 1:
         epitopes = [('NonEpitope',seq[i],np.array([i]),np.nan) for i in permutation(validEpitopeInds)]
         inds = [e[2][0] for e in epitopes]

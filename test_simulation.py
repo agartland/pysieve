@@ -4,6 +4,7 @@ import numpy as np
 from simulation import *
 from za_hla import loadSouthAfricaHLA
 from HLAPredCache import hlaPredCache
+from meta import *
 
 import ipdb
 
@@ -23,7 +24,7 @@ class TestSimulation(unittest.TestCase):
         self.assertTrue(hasattr(simSD,'hlaFreq'))
     
     def test_oneInsertBased(self):
-        params =  { 'n':(5, 5),
+        params =  { 'n':(30, 30),
                     'nMutations': (0, 3), 
                     'nEpitopes': (0, 2),
                     'epitopeThreshold': (None,None),      #None means Ab epitope for pickEpitopes()
@@ -33,20 +34,27 @@ class TestSimulation(unittest.TestCase):
         s,simSD = self.getBaseSimulation()
         s.simulate(simSD, params = params)
         self.assertEqual(s.data.insertSeq, simSD.insertSeq)
-        self.assertEqual(s.data.seqDf.shape[0], 10)
+        self.assertEqual(s.data.seqDf.shape[0], params['n'][0] + params['n'][1])
         self.assertTrue(s.data.simParams == params)
         #ipdb.set_trace()
-        #self.assertEqual((s.data.simDf['epitopes'].map(len)[s.data.ptidDf.vaccinated] == (2*9)).sum(),5)
+        self.assertEqual(np.median(s.data.simDf['epitopes'].map(len)[s.data.ptidDf.vaccinated]), params['nEpitopes'][1] * 9)
+        self.assertEqual(np.median(s.data.simDf['mutations'].map(len)[s.data.ptidDf.vaccinated]), params['nMutations'][1])
     
     def test_oneAb(self):
-        params =  { 'n':(5, 5),
-                    'nMutations': (0, 3), 
-                    'nEpitopes': (0, 2),
+        params =  { 'n':(40, 40),
+                    'nMutations': (0, 4), 
+                    'nEpitopes': (0, 3),
                     'epitopeThreshold': (None,None),      #None means Ab epitope for pickEpitopes()
                     'insertAsBase':(False,False)}       #Use sampled sequences as base
 
         s,simSD = self.getBaseSimulation()
         s.simulate(simSD, params = params)
+        self.assertEqual(s.data.insertSeq, simSD.insertSeq)
+        self.assertEqual(s.data.seqDf.shape[0], params['n'][0] + params['n'][1])
+        self.assertTrue(s.data.simParams == params)
+        
+        self.assertEqual(np.median(s.data.simDf['epitopes'].map(len)[s.data.ptidDf.vaccinated]), params['nEpitopes'][1] * 9)
+        self.assertEqual(np.median(s.data.simDf['mutations'].map(len)[s.data.ptidDf.vaccinated]), params['nMutations'][1])
     
     def test_oneNoEpitopes(self):
         params =  { 'n':(5, 5),
@@ -57,7 +65,10 @@ class TestSimulation(unittest.TestCase):
         s,simSD = self.getBaseSimulation()
         s.simulate(simSD, params = params)
 
-    @unittest.skip("not yet")
+        self.assertEqual(s.data.insertSeq, simSD.insertSeq)
+        self.assertEqual(s.data.seqDf.shape[0], params['n'][0] + params['n'][1])
+        self.assertTrue(s.data.simParams == params)
+
     def test_meta(self):
         s,simSD = self.getBaseSimulation()
         varyParams = {'nMutations' : [(0,n) for n in [3,6,9]]}
@@ -69,12 +80,13 @@ class TestSimulation(unittest.TestCase):
                     'insertAsBase':(False,False)}       #Use sampled sequences as base
 
         sims = simulationMeta('data/', 'test_simulations', basedata = simSD, baseparams = params)
-        sims.runSimulations(varyParams, ba = self.ba, nreps = 5)
+        sims.runSimulations(varyParams, ba = None, nreps = 5)
         sims.save()
+        ipdb.set_trace()
     def test_loadMeta(self):
         pass
 
-@unittest.skip("Not testing T-cell epitope simulations.")
+@unittest.skip("Only works with install of prediction tools")
 class TestTcellEpitopeSimulations(unittest.TestCase):
     def setUp(self):
         fn = 'data/gag.cladec.ZA.2012.netmhcpan'
@@ -85,9 +97,8 @@ class TestTcellEpitopeSimulations(unittest.TestCase):
         simSD = simSDFromLANL('./data/', protein = 'gag', year = 2012, clade = 'C', hlaFreq = freq)
         s = sieveSimulation()
         return s,simSD
-
-    def test_oneTcellEpitopes(self):
-        params =  { 'n':(5, 5),
+    def test_noBA(self):
+        params =  { 'n':(15, 15),
                     'nMutations': (0, 3),
                     'nEpitopes': (0, 2),
                     'epitopeThreshold': (0,5),
@@ -95,10 +106,28 @@ class TestTcellEpitopeSimulations(unittest.TestCase):
                     'insertAsBase':(False,False)}       #Use sampled sequences as base
 
         s,simSD = self.getBaseSimulation()
-        s.simulate(simSD, params = params)
+        with self.assertRaises(ValueError) as cm:
+            s.simulate(simSD, params = params, ba = None)
+
+    def test_oneTcellEpitopes(self):
+        params =  { 'n':(15, 15),
+                    'nMutations': (0, 3),
+                    'nEpitopes': (0, 2),
+                    'epitopeThreshold': (0,5),
+                    'escapeMutations':(False,False),
+                    'insertAsBase':(False,False)}       #Use sampled sequences as base
+
+        s,simSD = self.getBaseSimulation()
+        s.simulate(simSD, params = params, ba = self.ba)
+        self.assertEqual(s.data.insertSeq, simSD.insertSeq)
+        self.assertEqual(s.data.seqDf.shape[0], params['n'][0] + params['n'][1])
+        self.assertTrue(s.data.simParams == params)
+        #ipdb.set_trace()
+        self.assertEqual(np.median(s.data.simDf['epitopes'].map(len)[s.data.ptidDf.vaccinated]), params['nEpitopes'][1])
+        self.assertEqual(np.median(s.data.simDf['mutations'].map(len)[s.data.ptidDf.vaccinated]), params['nMutations'][1])
 
     def test_oneTcellEscape(self):
-        params =  { 'n':(5, 5),
+        params =  { 'n':(15, 15),
                     'nMutations': (0, 3),
                     'nEpitopes': (0, 2),
                     'epitopeThreshold': (0,5),
@@ -107,7 +136,14 @@ class TestTcellEpitopeSimulations(unittest.TestCase):
                     'insertAsBase':(False,False)}       #Use sampled sequences as base
 
         s,simSD = self.getBaseSimulation()
-        s.simulate(simSD, params = params)
+        s.simulate(simSD, params = params, ba = self.ba)
+        self.assertEqual(s.data.insertSeq, simSD.insertSeq)
+        self.assertEqual(s.data.seqDf.shape[0], params['n'][0] + params['n'][1])
+        self.assertTrue(s.data.simParams == params)
+        #ipdb.set_trace()
+        self.assertEqual(np.median(s.data.simDf['epitopes'].map(len)[s.data.ptidDf.vaccinated]), params['nEpitopes'][1])
+        self.assertEqual(np.median(s.data.simDf['mutations'].map(len)[s.data.ptidDf.vaccinated]), params['nMutations'][1])
+
     
     @unittest.skip("Plotting not implemented")
     def test_plotSimulation(self):

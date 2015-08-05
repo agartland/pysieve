@@ -17,6 +17,7 @@ import time
 from copy import deepcopy
 import pandas as pd
 import numpy as np
+import itertools
 
 from simulation import *
 #from evaluation import *
@@ -35,13 +36,13 @@ __all__=['simulationMeta',
          'plotFPR',
          'plotPRatP']
 
-class analysisMeta(baseMeta):
+class analysisMeta(object):
     """Class for organizing, saving/loading analyses (single method) of a simulationMeta object"""
     def __init__(self, dataPath, meta, analysisMethodClass):
         self.dataPath = dataPath
         self.simName = meta.simName
-        self.resDf = pd.DataFrame(np.empty((meta.shape[0],3)), dtype = object), columns = ['pvalue','observed','res'], index = meta.index)
-        self.metaDf meta
+        self.resDf = pd.DataFrame(np.empty((meta.shape[0],3), dtype = object), columns = ['pvalue','observed','res'], index = meta.index)
+        self.metaDf = meta
         self.analysisMethodClass = analysisMethodClass
         self.analysisName = analysisMethodClass(None).methodName
         self.checkDirs()
@@ -239,9 +240,11 @@ class analysisMeta(baseMeta):
         for sid in simIDs:
             self._loadOne(sid, deferResults, deferData)
 
-    def eval(self, simID, evalClass = siteEval):
+    def eval(self, simID, evalClass = None):
         """Returns an eval object for a particular analysis
         TODO: should this file make sure that the analysis and data is loaded (not a string)?"""
+        if evalClass is None:
+            evalClass = siteEval
         return evalClass(self.resDf.res.loc[simID].data, self.resDf.res.loc[simID].results)
 
 class simulationMeta(object):
@@ -259,16 +262,16 @@ class simulationMeta(object):
         res.update({vp:[] for vp in varyParams.keys()})
         
         """Add a parameter 'rep' for repeating the same simulation multiple times"""
-        varyParams.update({'rep':arange(nreps)})
+        varyParams.update({'rep':np.arange(nreps)})
         vpKeys = varyParams.keys()
 
         """Initialize self.metaDf with parameters and empty sieve simulation objects"""
-        for i,val in enumerate(multi_for([varyParams[k] for k in vpKeys])):
+        for i,values in enumerate(itertools.product([varyParams[k] for k in vpKeys])):
             res['simID'].append(i)
             params = deepcopy(self.baseparams)
             for ki,k in enumerate(vpKeys):
-                params.update({k:val[ki]})
-                res[k].append(val[ki])
+                params.update({k:values[ki]})
+                res[k].append(values[ki])
             res['params'].append(params)
             s = sieveSimulation()
             res['sim'].append(s)
@@ -442,7 +445,6 @@ class siteMeta(simulationMeta):
     def plotCanon(self, variedParam = 'mutations_per_epitope', cutoff = 0.05, dx = 'vac'):
         """Scatter plot of the number of canonical vs. non-canonical sieve effects for each param value"""
         dx = 1 if dx=='vac' else 0
-        pFunc = lambda p: -10 * np.log10(p)
         mycm = ['darkgreen','fuchsia','saddlebrown','lightseagreen','gold','royalblue','tomato','thistle','tan']
     
         clf()
@@ -465,18 +467,18 @@ class siteMeta(simulationMeta):
         colorLegend(colors = mycm[:colori], labels = ['%d' % v[dx] for v in uValues], title = variedParam)
         title(self.resDf.res[0].identifierStr())
 
-def loadGlobalPvalues(dataPath,simNames,analysisNames,variedParam='nMutations',trtVaried='vaccine'):
+def loadGlobalPvalues(dataPath, simNames, analysisNames, variedParam = 'nMutations', trtVaried = 'vaccine'):
     """Open results file for all simulation types, analysis method names and return a
        pvalue array [type x method x param x reps]"""
     
     """Used to specify which treatment group's parameter is varying"""
     trtVaried = 1 if trtVaried == 'vaccine' else 0
 
-    getFn = lambda sname,aname: dataPath + 'sievesim/%s/%s.%s.meta.pkl' % (sname,sname,aname)
+    getFn = lambda sname,aname: dataPath + 'sievesim/%s/%s.%s.meta.pkl' % (sname, sname, aname)
 
     """Load one to dims for the array"""
-    sims = simulationMeta(dataPath,simNames[0])
-    sims.loadFirst(getFn(simNames[0],analysisNames[0]))
+    sims = simulationMeta(dataPath, simNames[0])
+    sims.loadFirst(getFn(simNames[0], analysisNames[0]))
 
     """uValues is the unique set of vac and pla parameters in tuple form (pla,vac)"""
     uValues = sorted(sims.resDf[variedParam].unique(), key = lambda param: param[trtVaried])
@@ -490,11 +492,11 @@ def loadGlobalPvalues(dataPath,simNames,analysisNames,variedParam='nMutations',t
     pvalues = np.zeros((nTypes,nMethods,nParams,nReps), dtype = np.float64)
     for si,sname in enumerate(simNames):
         for ai,aname in enumerate(analysisNames):
-            sims=simulationMeta(dataPath,sname)
-            sims.loadFirst(getFn(sname,aname))
+            sims=simulationMeta(dataPath, sname)
+            sims.loadFirst(getFn(sname, aname))
 
             for parami,param in enumerate(uValues):
-                pvalues[si,ai,parami,:]=sims.resDf.pvalue[sims.resDf[variedParam]==param]
+                pvalues[si,ai,parami,:] = sims.resDf.pvalue[sims.resDf[variedParam] == param]
     return pvalues, paramVec
 
 """Global constants used by these plot functions"""
@@ -591,7 +593,6 @@ NOTE: these functions won't work anymore now that I've changed around the loadin
 def plotVariedParamGlobal(dataPath,analysisMethodNames,simName,variedParam='mutations_per_epitope',dx='vac'):
     """Plot the observed magnitude and significance of sieve analysis over the range of the varied parameter"""
     dx = 1 if dx=='vac' else 0
-    pFunc = lambda p: -10*np.log10(p)
     mycm = ['darkgreen','fuchsia','saddlebrown','lightseagreen','gold','royalblue','tomato','thistle','tan']
     cutoff = 0.05
 
@@ -639,7 +640,7 @@ def plotVariedParamGlobal(dataPath,analysisMethodNames,simName,variedParam='muta
     title('%s\nSimulation: %s' % (sims.resDf.res[0].identifierStr(),simName))
 
     subplot(2,1,2)
-    axhline(-10*np.log10(cutoff), ls = '--', color = 'gray')
+    axhline(pFunc(cutoff), ls = '--', color = 'gray')
     #plot(xlim(),[-10*log10(cutoff)]*2,'--',color='gray')
     xlabel(variedParam)
     #ylabel('$-10 log_{10}(p)$')
@@ -653,7 +654,6 @@ def plotVariedParamSite(dataPath,analysisMethodNames,simName,variedParam='mutati
     """Plot the observed magnitude, significance, specificity and sensitivity of sieve analysis 
     over the range of the varied parameter"""
     dx = 1 if dx=='vac' else 0
-    pFunc = lambda p: -10*np.log10(p)
     cutoff = 0.05
     mycm = ['darkgreen','fuchsia','saddlebrown','lightseagreen','gold','royalblue','tomato','thistle','tan']
     
@@ -688,7 +688,6 @@ def plotSiteROC(sims,variedParam='mutations_per_epitope',cutoff=0.05,dx='vac'):
        []
     """
     dx = 1 if dx=='vac' else 0
-    pFunc = lambda p: -10 * np.log10(p)
     mycm=['darkgreen','fuchsia','saddlebrown','lightseagreen','gold','royalblue','tomato','thistle','tan']
 
     clf()
