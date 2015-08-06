@@ -121,7 +121,7 @@ class sieveSimulation(sieveDataMethods):
             raise Exception('No params[] specified!')
         if not 'epitopeThreshold' in params:
             """Make non-contiguous Ab epitopes by default"""
-            params['epitopeThreshold'] = (None,None)
+            params['epitopeThreshold'] = (None, None)
 
         self.ba = ba
 
@@ -208,7 +208,7 @@ class sieveSimulation(sieveDataMethods):
                                                         validEpitopeInds)
                     if len(epitopeInds) == 0:
                         print 'No epitopes for %s, %s, %s, %s' % tuple(tmpHLA)
-                    elif 'escapeMutations' in params and params['escapeMutations'][vaccinated] and np.any([seq[e[2][0]]=='-' for e in epitopes]):
+                    elif 'escapeMutations' in params and params['escapeMutations'][vaccinated] and np.any([seq[e[2][0]] == '-' for e in epitopes]):
                         epitopeInds,epitopes = [],[]
                         """If the first AA of the epitope in the BT is - then find a different epitope"""
                 """
@@ -219,6 +219,7 @@ class sieveSimulation(sieveDataMethods):
                     (3) Mutate the site (or accept the escape variant)
                     (4) If it was accepted, increment the counter
                 """
+
                 if len(epitopeInds) >= 1:
                     probMut = params['nMutations'][vaccinated] / np.float32(len(epitopeInds))
                     randVar = stats.binom(n = len(epitopeInds), p = probMut)
@@ -299,7 +300,7 @@ class sieveSimulation(sieveDataMethods):
                 data['epitopes'].append(epitopes)
                 data['mutations'].append(mutations)
                 data['infected'].append(True)
-                data['seqID'].append('%d_%s' % (ptid,basePtid))
+                data['seqID'].append('%d_%s' % (ptid, basePtid))
                 ptid += 1
             
         df = pd.DataFrame(data)
@@ -309,7 +310,7 @@ class sieveSimulation(sieveDataMethods):
         uHLA4 = sorted(list(set(np.concatenate(data['hla']))))
         uHLA2 = sorted(list(set([h[:-2] for h in uHLA4])))
 
-        hlaDict = {'ptid':list(df.index)}
+        hlaDict = {'ptid' : list(df.index)}
         N = len(hlaDict['ptid'])
         for h in uHLA4 + uHLA2:
             hlaDict.update({h:[False]*N})

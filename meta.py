@@ -96,7 +96,7 @@ class analysisMeta(object):
         return self.getRelativeDir() + '%s.%d.pkl' % (self.analysisName, simID)
     def getAbsPath(self, simID):
         return self.dataPath + self.getRelativePath(simID)
-    def getAbsDir(self, simID):
+    def getAbsDir(self):
         return self.dataPath + self.getRelativeDir()
     def checkDirs(self):
         """Creates the needed subdirectories if they do not exist"""
@@ -123,7 +123,7 @@ class analysisMeta(object):
         obj = pd.read_pickle(absFn)
         return obj
 
-    def saveMetaPkl():
+    def saveMetaPkl(self):
         self.checkDirs()
 
         """dict with a copy of self.resDf that contains only links to data files instead of the data"""
@@ -266,7 +266,7 @@ class simulationMeta(object):
         vpKeys = varyParams.keys()
 
         """Initialize self.metaDf with parameters and empty sieve simulation objects"""
-        for i,values in enumerate(itertools.product([varyParams[k] for k in vpKeys])):
+        for i,values in enumerate(itertools.product(*tuple([varyParams[k] for k in vpKeys]))):
             res['simID'].append(i)
             params = deepcopy(self.baseparams)
             for ki,k in enumerate(vpKeys):
@@ -291,7 +291,7 @@ class simulationMeta(object):
         return self.getRelativeDir() + 'simdata.%d.pkl' % (simID)
     def getAbsPath(self, simID):
         return self.dataPath + self.getRelativePath(simID)
-    def getAbsDir(self, simID):
+    def getAbsDir(self):
         return self.dataPath + self.getRelativeDir()
     def checkDirs(self):
         """Creates the needed subdirectories if they do not exist"""
@@ -318,7 +318,7 @@ class simulationMeta(object):
         obj = pd.read_pickle(absFn)
         return obj
 
-    def saveMetaPkl():
+    def saveMetaPkl(self):
         self.checkDirs()
 
         """dict with a copy of self.resDf that contains only links to data files instead of the data"""
