@@ -167,7 +167,7 @@ class analysisMeta(object):
                 tmp = self.resDf.res.loc[simID]
             
             """Save the results to a file"""
-            self.writeObject(tmp, self.getRelativePath(simID))
+            self.writeObject(tmp, self.getRelativePath(simID), relative = True)
             
             if not preserveObject:
                 """Assign the object a filename link"""
@@ -338,7 +338,7 @@ class simulationMeta(object):
 
     def _saveOne(self, simID, preserveObject = True):
         """Save the data to a file"""
-        self.writeObject(self.metaDf.sim.loc[simID], self.getRelativePath(simID))
+        self.writeObject(self.metaDf.sim.loc[simID], self.getRelativePath(simID), relative = True)
         if not preserveObject:
             """Assign the object a filename link"""
             self.metaDf.sim[simID] = self.getRelativePath(simID)
@@ -353,9 +353,8 @@ class simulationMeta(object):
 
     def save(self):
         self.saveMetaPkl()
-
         """Go through each data file and save it, preserving the object in memory though"""
-        for simID in self.resDf.index:
+        for simID in self.metaDf.index:
             self._saveOne(simID, preserveObject = True)
     def loadMetaPkl(self, analysisName):
         tmp = self.readObject('sievesim/%s/%s.%s.meta.pkl' % (self.simName, self.simName, analysisName), relative = True)

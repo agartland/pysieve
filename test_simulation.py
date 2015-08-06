@@ -82,7 +82,6 @@ class TestSimulation(unittest.TestCase):
         sims = simulationMeta('data/', 'test_simulations', basedata = simSD, baseparams = params)
         sims.runSimulations(varyParams, ba = None, nreps = 5)
         sims.save()
-        ipdb.set_trace()
     def test_loadMeta(self):
         pass
 
