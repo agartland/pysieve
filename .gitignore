@@ -1,4 +1,5 @@
 data/*.out
+data/test_simulations
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
