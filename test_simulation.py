@@ -82,6 +82,8 @@ class TestSimulation(unittest.TestCase):
         sims = simulationMeta('data/', 'test_simulations', basedata = simSD, baseparams = params)
         sims.runSimulations(varyParams, ba = None, nreps = 5)
         sims.save()
+        self.assertEqual(sims.metaDf.shape[0], 5 * 3)
+        
     def test_loadMeta(self):
         pass
 
