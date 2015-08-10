@@ -118,7 +118,13 @@ class sieveAnalysis(object):
                 pvalue = float(pvalue)
             df.iloc[0] = pd.Series([self.results.analysisMethod, plaDist,vacDist,observed,pvalue],index = columns)
         else:
-            columns = ['Local method','Site','Site index','Mean placebo distance','Mean vaccine distance','Observed statistic','P-value']
+            columns = ['Local method',
+                       'Site',
+                       'Site index',
+                       'Mean placebo distance',
+                       'Mean vaccine distance',
+                       'Observed statistic',
+                       'P-value']
             try:
                 dist = self.results.scannedDist.values
             except:
@@ -138,51 +144,49 @@ class sieveAnalysis(object):
                                             obs,
                                             p],index = columns)
         return df
-    def computeDistance(self,params=None):
+    def computeDistance(self, params = None):
         pass
     @staticmethod
-    def comparisonStat(masked_dist,aInd,bInd):
+    def comparisonStat(masked_dist, aInd, bInd):
         pass
-    def computeObserved(self,distFilter=None):
+    def computeObserved(self, distFilter = None):
         """Compute the observed value of the difference between the vaccine and placebo groups (possibly, for each site)
            Creates filteredDist which is needed to call permutationTest()"""
         if distFilter is None:
             """If no filter exists then create a filter that excludes nans"""
-            distFilter=ones(self.results.dist.shape,dtype=bool)
+            distFilter = np.ones(self.results.dist.shape, dtype = bool)
         """Filter out nan distances (per PTID, not the whole site)"""
-        distFilter[isnan(self.results.dist.values)]=False
-        self.results.distFilter=distFilter
+        distFilter[isnan(self.results.dist.values)] = False
+        self.results.distFilter = distFilter
         """Prepare dist applies the distFilter and creates filteredDist (which also aggregates across sites for global distances)"""
         self.prepareDist()
-        tmpFunc=self.comparisonStat
-        self.results.observed=tmpFunc(self.results.filteredDist,aInd=self.data.vacInd,bInd=self.data.plaInd)
-    def permutationTest(self,nperms=None,clusterClient=None):
-        """
-        Permutation test using the comparison stat over the two treatment groups based on distances in self.filteredDist
+        tmpFunc = self.comparisonStat
+        self.results.observed = tmpFunc(self.results.filteredDist, aInd = self.data.vacInd, bInd = self.data.plaInd)
+    def permutationTest(self, nperms = None, clusterClient = None):
+        """Permutation test using the comparison stat over the two treatment groups based on distances in self.filteredDist
         dist: can be [ptid x sites] or [ptid] or whatever as long as the comparisonStat can handle filteredDist correctly
         observed: tstat for each site (pd.Series with arange(nSites as index))
 
-        Note: must be preceded by calls to computeDistance() and computeObserved() to set up self.filteredDist
-        """
+        Note: must be preceded by calls to computeDistance() and computeObserved() to set up self.filteredDist"""
         if nperms is None:
-            nperms=self.nPerms
+            nperms = self.nPerms
         else:
-            self.nPerms=nperms
+            self.nPerms = nperms
 
-        vacN=self.data.vacInd.sum()
-        plaN=self.data.plaInd.sum()
+        vacN = self.data.vacInd.sum()
+        plaN = self.data.plaInd.sum()
 
-        sitesN=self.results.dist.shape[1]
+        sitesN = self.results.dist.shape[1]
 
         """Predetermine the permutation indices"""
-        numpy.random.seed(self.results.randomSeed)
-        randInds=[]
+        np.random.seed(self.results.randomSeed)
+        randInds = []
         for permi in arange(nperms):
-            ind=numpy.random.permutation(self.data.N)
+            ind = np.random.permutation(self.data.N)
             randInds.append({'aInd':ind[:vacN],'bInd':ind[vacN:]})
         
         if clusterClient is None:
-            self.results.permutations=permfunc(randInds,self.results.filteredDist,self.comparisonStat)
+            self.results.permutations = permfunc(randInds,self.results.filteredDist,self.comparisonStat)
         else:
             """Update code on remote machines"""
             """
@@ -190,55 +194,56 @@ class sieveAnalysis(object):
                 code=fh.read()
             clusterClient[:].execute(code,block=True)
             """
-            clusterClient[:]['remote_dist']=self.results.filteredDist
-            clusterClient[:].scatter('remote_inds',randInds,block=True)
-            clusterClient[:].execute('remote_result=permfunc(remote_inds,remote_dist,%s)' % self.remoteComparisonStat,block=True)
-            self.results.permutations=clusterClient[:].gather('remote_result',block=True)
+            clusterClient[:]['remote_dist'] = self.results.filteredDist
+            clusterClient[:].scatter('remote_inds', randInds, block = True)
+            clusterClient[:].execute('remote_result=permfunc(remote_inds,remote_dist,%s)' % self.remoteComparisonStat, block = True)
+            self.results.permutations = clusterClient[:].gather('remote_result', block = True)
 
             #self.results.permutations=ParallelFunction(clusterClient[:],permTestFunc,block=True,chunksize=nperms/(2*len(clusterClient)))(randInds)
             
     def computePvalues(self):
-        observed=tile(array(self.results.observed),(self.results.permutations.shape[0],1))
-        self.results.pvalue=1-(abs(self.results.permutations)<abs(observed)).sum(axis=0).astype(float64)/observed.shape[0]
-        self.results.pvalue[self.results.pvalue<(float64(1)/float64(observed.shape[0]))]=float64(1)/observed.shape[0]
-    def computeFST(self,nperms=10,subst=None):
+        observed = np.tile(np.array(self.results.observed), (self.results.permutations.shape[0],1))
+        self.results.pvalue = 1 - (np.abs(self.results.permutations) < np.abs(observed)).sum(axis=0).astype(np.float64)/observed.shape[0]
+        self.results.pvalue[self.results.pvalue < (np.float64(1)/np.float64(observed.shape[0]))] = np.float64(1)/observed.shape[0]
+    def computeFST(self, nperms = 10, subst = None):
         """Compute a statistic that compares pairwise diversity (PD) within group to PD between groups,
-        and performs a permutation test"""
+        and performs a permutation test
 
+        TODO: Test since switched to use seqdistance"""
         if subst is None:
-            print 'Using Nan gapScores (i.e. ignoring gap comparisons)'
-            PDFunc = _PD_hamming
-        else:
-            PDFunc = _PD
+            self.logger.info('Using Nan gapScores (i.e. ignoring gap comparisons)')
+            subst = seqdistance.matrices.addGapScores(seqdistance.matrices.binarySubst, seqdistance.matrices.binGapScores)
 
-        def fst(align,vInd,pInd,subst):
-            VP = PDFunc(align.loc[vInd],align.loc[pInd],subst,False,False)
-            VV = PDFunc(align.loc[vInd],None,subst,False,True)
-            PP = PDFunc(align.loc[pInd],None,subst,False,True)
-            return (VP-(VV+PP)/2)/VP
+        PDFunc = lambda a,b: np.nanmean(seqdistance.distance_df(a.tolist(),b.tolist(), args = (subst), symteric = True))
 
-        vacN=self.data.vacInd.sum()
-        plaN=self.data.plaInd.sum()
+        def fst(align, vInd, pInd):
+            VP = PDFunc(align.loc[vInd], align.loc[pInd])
+            VV = PDFunc(align.loc[vInd], align.loc[vInd])
+            PP = PDFunc(align.loc[pInd], align.loc[pInd])
+            return (VP - (VV + PP) / 2) / VP
+
+        vacN = self.data.vacInd.sum()
+        plaN = self.data.plaInd.sum()
         
-        obs = fst(self.data.seqDf.seq,self.data.vacInd,self.data.plaInd,subst)
+        obs = fst(self.data.seqDf.seq, self.data.vacInd, self.data.plaInd)
         
-        samps = zeros(nperms)
-        numpy.random.seed(self.results.randomSeed)
-        for permi in arange(nperms):
-            ind=numpy.random.permutation(self.data.N)
-            samps[permi] = fst(self.data.seqDf.seq,ind[:vacN],ind[vacN:],subst)
-        return obs,(samps>obs).sum()/nperms
-
+        samps = np.zeros(nperms)
+        np.random.seed(self.results.randomSeed)
+        for permi in range(nperms):
+            ind = np.random.permutation(self.data.N)
+            samps[permi] = fst(self.data.seqDf.seq, ind[:vacN], ind[vacN:])
+        pvalue = (samps > obs).sum() / nperms
+        return obs, pvalue
 
 class siteAnalysis(sieveAnalysis):
     """Base class for all site- or kmer-based analyses (distance matrix has dims [N x nSites])"""
-    methodName='site'
-    comparisonStat=staticmethod(compstat_tstat)
-    remoteComparisonStat='compstat_tstat'
+    methodName = 'site'
+    comparisonStat = staticmethod(compstat_tstat)
+    remoteComparisonStat = 'compstat_tstat'
     def prepareDist(self):
         """Use a ndarray instead of masked array to improve speed"""
-        self.results.filteredDist=deepcopy(self.results.dist.as_matrix())
-        self.results.filteredDist[~self.results.distFilter]=nan
+        self.results.filteredDist = deepcopy(self.results.dist.as_matrix())
+        self.results.filteredDist[~self.results.distFilter] = np.nan
         '''
         """Turn the dist DataFrame into a masked ndarray based on the filter"""
         mask=~self.results.distFilter
@@ -254,16 +259,16 @@ class siteAnalysis(sieveAnalysis):
 
 class siteScanAnalysis(siteAnalysis):
     """Base class for all site- or kmer-based analyses with a parameter scan (distance matrix has dims [N x nSites x nParams])"""
-    methodName='site_scan'
-    comparisonStat=staticmethod(compstat_tstat_scan)
-    remoteComparisonStat='compstat_tstat_scan'
+    methodName = 'site_scan'
+    comparisonStat = staticmethod(compstat_tstat_scan)
+    remoteComparisonStat = 'compstat_tstat_scan'
 
     def prepareDist(self):
         """Turn the dist DataFrame into a masked ndarray based on the filter"""
         """Since the filter will be of shape [PTIDS x nSites] use it as is"""
         """Use a ndarray instead of masked array to improve speed"""
-        self.results.filteredDist=deepcopy(self.results.dist)
-        self.results.filteredDist[~self.results.distFilter]=nan
+        self.results.filteredDist = deepcopy(self.results.dist)
+        self.results.filteredDist[~self.results.distFilter] = np.nan
         '''
         mask=~self.results.distFilter
         self.results.filteredDist=ma.masked_array(data=self.results.dist,mask=mask,fill_value=nan)
@@ -271,21 +276,20 @@ class siteScanAnalysis(siteAnalysis):
     
 class globalAnalysis(sieveAnalysis):
     """Base class for all global analyses (distance matrix has dims [ N ])"""
-    methodName='global'
-    comparisonStat=staticmethod(compstat_tstat)
-    remoteComparisonStat='compstat_tstat'
+    methodName = 'global'
+    comparisonStat = staticmethod(compstat_tstat)
+    remoteComparisonStat = 'compstat_tstat'
     def prepareDist(self):
-        """
-        Turn the dist DataFrame into a masked ndarray based on the filter
+        """Turn the dist DataFrame into a masked ndarray based on the filter
         For a "global" distance this also mean taking the distance matrix [N x sites]
         and computing a summary statistc so that filteredDist is [N]
         The inherited/default summary statistic is a sum(axis = 1) across sites, divide by the number of valid sites
-            resulting in a distance per site scaling
-        """
+            resulting in a distance per site scaling"""
+
         """Use a ndarray instead of masked array to improve speed"""
-        self.results.filteredDist=deepcopy(self.results.dist.as_matrix())
-        self.results.filteredDist[~self.results.distFilter]=nan
-        self.results.filteredDist=nansum(self.results.filteredDist,axis=1)/(~isnan(self.results.filteredDist)).sum(axis=1)
+        self.results.filteredDist = deepcopy(self.results.dist.as_matrix())
+        self.results.filteredDist[~self.results.distFilter] = np.nan
+        self.results.filteredDist = np.nansum(self.results.filteredDist, axis=1) / (~np.isnan(self.results.filteredDist)).sum(axis=1)
         '''
         mask=~self.results.distFilter
         self.results.filteredDist=ma.masked_array(data=self.results.dist.as_matrix(),
@@ -296,30 +300,28 @@ class globalAnalysis(sieveAnalysis):
 
 
 class globalScanAnalysis(globalAnalysis):
-    """
-    Base class for all global analyses with a parameter scan
+    """Base class for all global analyses with a parameter scan
     The distance matrix has dims [N x nSites x nParams]
     But the filteredDist (on which the tstat performs) has dims [N x nParams]"""
-    methodName='global_scan'
-    comparisonStat=staticmethod(nonan_compstat_tstat_globalscan)
-    remoteComparisonStat='nonan_compstat_tstat_globalscan'
+    methodName = 'global_scan'
+    comparisonStat = staticmethod(nonan_compstat_tstat_globalscan)
+    remoteComparisonStat = 'nonan_compstat_tstat_globalscan'
 
     def prepareDist(self):
-        """
-        Turn the dist DataFrame into a masked ndarray based on the filter
+        """Turn the dist DataFrame into a masked ndarray based on the filter
         
         For a "global" distance this also mean taking the distance matrix [N x sites x params]
         and computing a summary statistc so that filteredDist is [N x params]
-        The inherited/default summary statistic is a sum(axis = 1) across sites (NOT CURRENTLY NORMALIZED BY THE NUMBER OF SITES)
-        """
+        The inherited/default summary statistic is a sum(axis = 1) across sites (NOT CURRENTLY NORMALIZED BY THE NUMBER OF SITES)"""
+
         """Since the filter will be of shape [PTIDS x nSites x nparams] use it as is"""
         """Use a ndarray instead of masked array to improve speed"""
-        self.results.filteredDist=deepcopy(self.results.dist)
-        self.results.filteredDist[~self.results.distFilter]=nan
-        self.results.filteredDist=nansum(self.results.filteredDist,axis=1)
+        self.results.filteredDist = deepcopy(self.results.dist)
+        self.results.filteredDist[~self.results.distFilter] = np.nan
+        self.results.filteredDist = np.nansum(self.results.filteredDist, axis=1)
 
         """Removing nans is fine for escape count-based distances and should speed up computation when paired with NONAN compstats"""
-        self.results.filteredDist[isnan(self.results.filteredDist)] = 0
+        self.results.filteredDist[np.isnan(self.results.filteredDist)] = 0
         
         '''
         mask=~self.results.distFilter
