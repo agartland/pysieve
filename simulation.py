@@ -55,7 +55,7 @@ from scipy import stats
 import re
 
 import HLAPredCache
-from HLAPredCache import grabKmer, grabKmerInds
+from HLAPredCache import grabKmer, grabKmerInds, RandCache
 
 """seqtools is not on github currently"""
 from seqtools import align2mat, fasta2df, padAlignment, consensus, identifyMindist
@@ -79,7 +79,7 @@ class sieveSimulationData(sieveData):
     simDf = None
 
 class sieveSimulation(sieveDataMethods):
-    def __init__(self, sievedata = None, predMethod = 'netMHCpan', testMode = False):
+    def __init__(self, sievedata = None, predMethod = 'netmhcpan', testMode = False):
         if sievedata is None:
             sievedata = sieveSimulationData()
         self.data = deepcopy(sievedata)
@@ -94,7 +94,8 @@ class sieveSimulation(sieveDataMethods):
             #self.ba.addPredictions(self.predMethod, [hla], peptides)
             resDf = HLAPredCache.predict.iedbPredict(self.predMethod, [hla], peptides)
         else:
-            results = [('DUMMY', hla, pep, pep, rand()*15) for p in peptides]
+            rba = RandCache()
+            results = [('DUMMY', hla, pep, pep, rba[(hla, pep)]) for pep in peptides]
 
             d = {'hla':[],'peptide':[],'pred':[]}
             for method,hla,pep,core,pred in results:
@@ -125,7 +126,7 @@ class sieveSimulation(sieveDataMethods):
 
         self.ba = ba
 
-        if isinstance(ba, HLAPredCache.hlaPredCache):
+        if isinstance(ba, HLAPredCache.hlaPredCache) or isinstance(ba, HLAPredCache.RandCache):
             self.ba.warn = True
         elif not (params['epitopeThreshold'][0] is None and params['epitopeThreshold'][1] is None):
             raise ValueError('HLAPredCache is None for T-cell epitope simulation')
@@ -236,7 +237,6 @@ class sieveSimulation(sieveDataMethods):
                             """Try all POSSIBLE single AA mutations"""
                             #print 'For PTID %d, mut %d, epitope (%s,%d-%s,%1.2f) tried variants of BT %s:' % (ptid,mutationsMade+1,curEpitope[0],curEpitope[2][0],curEpitope[1],curEpitope[3],curEpitopeSeq)
                             
-                            """TODO: HAD AN ISSUE HERE WHERE curEpitopeInds WAS None? Solved?"""
                             variants = _generateVariants(curEpitopeSeq, possibleAA = [possibleAA[i] for i in curEpitopeInds])
                             ic50Df = self.predictHLABinding(curEpitope[0], variants.keys())
                             """for pep,ic50 in zip(ic50Df.peptide,ic50Df.pred):
