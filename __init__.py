@@ -1,7 +1,6 @@
 from __future__ import division
-"""
-Sieve analysis and simulation for Python
-"""
+
+"""Sieve analysis and simulation for Python"""
 
 import distance
 import simulation
@@ -12,6 +11,8 @@ import meta
 import za_hla
 import filters
 import helpers
+import analysis_substbased as substbased
+import analysis_tcell as tcell
 
 __all__ = ['distance',
            'simulation',
@@ -21,19 +22,6 @@ __all__ = ['distance',
            'meta',
            'za_hla',
            'filters',
-           'helpers']
-
-"""
-from sieveio import *
-from analysis import *
-from analysis_global import *
-from analysis_local import *
-from ml import *
-from data import *
-from distance import *
-from evaluation import *
-from evaluation_binding_escape import *
-from filters import *
-from meta import *
-from simulation import *
-from helpers import *"""
+           'helpers',
+           'substbased',
+           'tcell']

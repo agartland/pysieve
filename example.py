@@ -43,7 +43,7 @@ for proteinName, insertName in base.validAnalyses:
     
     a.computeObserved(filter = site_filter)
 
-    a.permutationTest(10000, remoteClient = rclient)
+    a.permutationTest(10000, clusterClient = rclient)
     a.computePvalues()
     
     dataFn,analysisFn = saveSieve(DATA_PATH,a)

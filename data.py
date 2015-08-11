@@ -1,4 +1,3 @@
-from __future__ import division
 '''
 data.py
 contains classes for storing all the data objects for sieve analysis and basic input out routines (e.g. to_csv, to_fasta)
@@ -20,8 +19,6 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from Bio.Alphabet import Gapped, IUPAC
 from Bio.SubsMat.MatrixInfo import blosum90, ident
-#from seqtools import *
-#from HLAPredCache import *
 
 class sieveData(object):
     masterFn = None

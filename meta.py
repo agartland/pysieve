@@ -18,14 +18,14 @@ from copy import deepcopy
 import pandas as pd
 import numpy as np
 import itertools
+import logging
 
 from simulation import *
 #from evaluation import *
 
 """
 TODO:
-    (1) Use logger module instead of print statements
-    (2) Work on plotting methods (currently untested and non-functioning
+    (1) Work on plotting methods (currently untested and non-functioning
 """
 
 __all__=['simulationMeta',
@@ -38,15 +38,35 @@ __all__=['simulationMeta',
 
 class analysisMeta(object):
     """Class for organizing, saving/loading analyses (single method) of a simulationMeta object"""
-    def __init__(self, dataPath, meta, analysisMethodClass):
+    def __init__(self, dataPath, meta, analysisMethodClass, verbose = True):
         self.dataPath = dataPath
         self.simName = meta.simName
-        self.resDf = pd.DataFrame(np.empty((meta.shape[0],3), dtype = object), columns = ['pvalue','observed','res'], index = meta.index)
-        self.metaDf = meta
+        self.resDf = pd.DataFrame(np.empty((meta.metaDf.shape[0],3), dtype = object), columns = ['pvalue','observed','res'], index = meta.metaDf.index)
+        self.meta = meta
         self.analysisMethodClass = analysisMethodClass
         self.analysisName = analysisMethodClass(None).methodName
         self.checkDirs()
         self.save()
+
+        """Set up logger for printing progress of long-running simulations and analysis"""
+        self.logger = logging.getLogger('meta.analysis.%s.%s' % (self.simName,self.analysisName))
+        self.logger.setLevel(logging.INFO)
+
+        formatter = logging.Formatter('%(levelname)s:%(asctime)s:%(message)s')
+
+        if verbose:
+            """Create console handler and set level to debug"""
+            ch = logging.StreamHandler()
+            ch.setLevel(logging.INFO)
+            ch.setFormatter(formatter)
+            self.logger.addHandler(ch)
+
+        fh = logging.FileHandler(filename = self.getAbsDir() + 'meta_analysis.log', mode = 'w')
+        fh.setLevel(logging.INFO)
+        fh.setFormatter(formatter)
+        self.logger.addHandler(fh)
+
+        self.logger.info('%s analysis object initialized', self.analysisName)
 
     def runAnalyses(self, nperms, params = {}, distFilter = None, ba = None, clusterClient = None):
         """Run an analysis method on all the simulations, storing the results in resDf"""
@@ -59,36 +79,26 @@ class analysisMeta(object):
         else:
             ditchDist = params['ditchDist']
 
-        """Print progress to a file and to the screen"""
-        with open(self.dataPath + 'sievesim/%s/%s.log' % (self.simName, self.analysisName), 'w') as logFh:
-            msg = 'Running %d combinations of %d parameters' % (self.resDf.shape[0], self.resDf.shape[1] - 4)
-            print msg,
-            logFh.write('Starting: %s\n' % time.asctime())
-            logFh.write(msg + '\n')
-
-            startTime = time.time()
-            for simID in self.resDf.index:
-                """Load one simulation for analysis at a time (this clears out old ones as well)"""
-                self.subLoad(simID, self.analysisName)
-
-                tmp = analysisMethodClass(sievedata = self.metaDf.sim[simID].data)
-                tmp.initialize(ba = ba, params = params)
-                tmp.computeDistance()
-                tmp.computeObserved(distFilter = distFilter)
-                tmp.permutationTest(nperms, clusterClient)
-                tmp.computePvalues()
-                self.resDf.pvalue.loc[simID] = tmp.results.pvalue
-                self.resDf.observed.loc[simID] = tmp.results.observed.sum()
-                self.resDf.res.loc[simID] = tmp
-                
-                """Immediately after getting the result, save it to disk and replace with links"""
-                self.subSave(simID, thinPermutations = thinPermutations, ditchDist = ditchDist)
-                print '.',
-                if (simID % 100) == 0:
-                    logFh.write('%d: %2.1f min elapsed\n' % (simID,(time.time()-startTime)/60.))
-                    logFh.flush()
-            print 'done!'
-            logFh.write('Finished: %s\n' % time.asctime())
+        self.logger.info('Starting run of %d simulation analyses (combinations of %d parameters)', self.resDf.shape[0], self.resDf.shape[1] - 4)
+        startTime = time.time()
+        for simID in self.resDf.index:
+            """Load one simulation for analysis at a time (this clears out old ones as well)"""
+            self.meta.subLoad([simID])
+            tmp = self.analysisMethodClass(sievedata = self.meta.metaDf.sim.loc[simID].data)
+            tmp.initialize(ba = ba, params = params)
+            tmp.computeDistance()
+            tmp.computeObserved(distFilter = distFilter)
+            tmp.permutationTest(nperms, clusterClient)
+            tmp.computePvalues()
+            self.resDf.pvalue.loc[simID] = tmp.results.pvalue
+            self.resDf.observed.loc[simID] = tmp.results.observed.sum()
+            self.resDf.res.loc[simID] = tmp
+            
+            """Immediately after getting the result, save it to disk and replace with links"""
+            self.subSave(simID, thinPermutations = thinPermutations, ditchDist = ditchDist)
+            if (simID % round(self.resDf.shape[0]/10)) == 0:
+                self.logger.info('Completed %d analyses', simID + 1)
+        self.logger.info('Completed all analyses in %1.1f minutes', (time.time() - startTime)/60)
     def getRelativeDir(self):
         return '%s/%s/' % (self.simName, self.analysisName)
     def getRelativePath(self, simID):
@@ -131,19 +141,19 @@ class analysisMeta(object):
         outDict = {'resDf':deepcopy(self.resDf[columns])}
 
         """Replace objects with relative filenames"""
-        outDict['resDf']['res'] = outDict['resDf'].simID.map(lambda x: self.getRelativePath(x))
+        outDict['resDf']['res'] = outDict['resDf'].index.map(lambda x: self.getRelativePath(x))
 
         """It's always safe to save this file since it should never contain data, just paths to files
            (though sometimes these data files will not exist yet at these paths (sloppy maybe?)"""
         self.writeObject(outDict, '%s/%s/%s.%s.meta.pkl' % (self.dataPath, self.simName, self.simName, self.analysisName))
     
-    def _saveOne(self, simID, thinPermutations, ditchDist, preservObject = True):
+    def _saveOne(self, simID, thinPermutations, ditchDist, preserveObject = True):
         if not type(self.resDf.res[simID]) is str:
             if preserveObject:
                 tmp = deepcopy(self.resDf.res.loc[simID])
             else:
                 """Replace data attrib in analysisObj with filename too"""
-                self.resDf.res.loc[simID].data = self.metaDf.getRelativePath(simID)
+                self.resDf.loc[simID,'res'].data = self.meta.metaDf.getRelativePath(simID)
                 
                 """Set these attributes to None if they exist. Optionally ditch filteredDist and scannedDist too"""
                 remove = ['btBA','insertBA','distFilter','dist','temp']
@@ -171,7 +181,7 @@ class analysisMeta(object):
             
             if not preserveObject:
                 """Assign the object a filename link"""
-                self.resDf.res.loc[simID] = self.getRelativePath(simID)
+                self.resDf.loc[simID,'res'] = self.getRelativePath(simID)
 
     def subSave(self, simID, thinPermutations = 1000, ditchDist = True):
         """Saves the analysis file underlying a single simulation simID to save space
@@ -201,23 +211,22 @@ class analysisMeta(object):
         self.resDf = self.readObject('%s/%s.%s.meta.pkl' % (self.simName, self.simName, analysisName), relative = True)['resDf']
         self.analysisName = analysisName
     def _loadOne(self, sid, deferResults, deferData):
-        if not deferResults and type(self.resDf.res[sid]) is str:
+        if not deferResults and type(self.resDf.res.loc[sid]) is str:
             fullPath = self.dataPath + self.resDf.res.loc[sid]
             try:
-            
-                self.resDf.res.loc[sid] = pd.read_pickle(fullPath)
+                self.resDf.loc[sid,'res'] = pd.read_pickle(fullPath)
             except IOError:
                 raise IOError('Result file does not exist: %s' % fullPath)
 
-        if not deferData and type(self.resDf.res[sid].data) is str:
+        if not deferData and type(self.resDf.res.loc[sid].data) is str:
             fullPath = self.dataPath + self.resDf.res.loc[sid].data
             try:
                 """Load the data with the relative path"""
-                self.resDf.res.loc[ind].data = pd.read_pickle(fullPath)
+                self.resDf.loc[ind,'res'].data = pd.read_pickle(fullPath)
             except IOError:
                 raise IOError('Data file does not exist: %s' % fullPath)
 
-    def load(self, analysisName, deferResults = True, deferData = True):
+    def load(self, analysisName, deferResults = False, deferData = False):
         """Load pickled simulation meta object and then the sieveData and sieveResults objects from the paths in resDf.sim and resDf.res
         If deferData or deferResults then only load the meta object as self.metaDf but leave paths for data/results"""
 
@@ -228,13 +237,11 @@ class analysisMeta(object):
         for ind in self.resDf.index:
             self._loadOne(ind, deferResults, deferData)
 
-    def subLoad(self, simIDs, analysisName, deferResults = True, deferData = True):
+    def subLoad(self, simIDs, analysisName, deferResults = False, deferData = False):
         """Loads in the data and the results (if they exist) for a set of simulations,
            replacing the link with the actual object in resDf.
            This also replaces the old resDf object, freeing space taken by other simulations."""
-        if type(simIDs) is int:
-            simIDs = [simIDs]
-        
+
         self.loadMetaPkl(analysisName)
 
         for sid in simIDs:
@@ -249,13 +256,36 @@ class analysisMeta(object):
 
 class simulationMeta(object):
     """Class for organizing, saving/loading a large number of simulations"""
-    def __init__(self, dataPath, simName, basedata = None, baseparams = None, metadata = None):
+    def __init__(self, dataPath, simName, basedata = None, baseparams = None, metadata = None, verbose = True):
         self.dataPath = dataPath
         self.simName = simName
         self.basedata = basedata
         self.baseparams = baseparams
         if not metadata is None:
             self.metaDf = metadata
+
+        self.checkDirs()
+
+        """Set up logger for printing progress of long-running simulations and analysis"""
+        self.logger = logging.getLogger('meta.simulation.%s' % (self.simName))
+        self.logger.setLevel(logging.INFO)
+
+        formatter = logging.Formatter('%(levelname)s:%(asctime)s:%(message)s')
+
+        if verbose:
+            """Create console handler and set level to debug"""
+            ch = logging.StreamHandler()
+            ch.setLevel(logging.INFO)
+            ch.setFormatter(formatter)
+            self.logger.addHandler(ch)
+
+        fh = logging.FileHandler(filename = self.getAbsDir() + 'meta_simulation.log', mode = 'w')
+        fh.setLevel(logging.INFO)
+        fh.setFormatter(formatter)
+        self.logger.addHandler(fh)
+
+        self.logger.info('%s simulation object initialized', self.simName)
+        
     def runSimulations(self, varyParams, ba = None, nreps = 1):
         """Run a set of simulations varying the parameters over the specified ranges and storing the results in self.metaDf"""
         res = {'simID':[],'sim':[],'params':[],'rep':[]}
@@ -278,12 +308,13 @@ class simulationMeta(object):
         self.metaDf = pd.DataFrame(res)
 
         """Simulate and save as you go to conserve memory"""
+        startTime = time.time()
         for sid in self.metaDf.index:
-            if sid % round(self.metaDf.shape[0]/20) == 0:
-                print "Simulation %d of %d" % (sid, self.metaDf.shape[0])
-                sys.stdout.flush()
+            if sid % round(self.metaDf.shape[0]/10) == 0:
+                self.logger.info("Completed %d simulations (of %d)", sid + 1, self.metaDf.shape[0] + 1)
             self.metaDf.sim.loc[sid].simulate(self.basedata, params = self.metaDf.params.loc[sid], ba = ba)
             self.subSave(sid)
+        self.logger.info('Completed all simulations in %1.1f minutes', (time.time() - startTime)/60)
     def getRelativeDir(self):
         return '%s/data/' % (self.simName)
     def getRelativePath(self, simID):
@@ -341,7 +372,7 @@ class simulationMeta(object):
         self.writeObject(self.metaDf.sim.loc[simID], self.getRelativePath(simID), relative = True)
         if not preserveObject:
             """Assign the object a filename link"""
-            self.metaDf.sim[simID] = self.getRelativePath(simID)
+            self.metaDf.loc[simID,'sim'] = self.getRelativePath(simID)
 
     def subSave(self, simID, preserveObject = False):
         """Saves the analysis file underlying a single simulation simID to save space
@@ -356,18 +387,18 @@ class simulationMeta(object):
         """Go through each data file and save it, preserving the object in memory though"""
         for simID in self.metaDf.index:
             self._saveOne(simID, preserveObject = True)
-    def loadMetaPkl(self, analysisName):
-        tmp = self.readObject('sievesim/%s/%s.%s.meta.pkl' % (self.simName, self.simName, analysisName), relative = True)
+    def loadMetaPkl(self):
+        tmp = self.readObject('%s/%s.sim.meta.pkl' % (self.simName, self.simName), relative = True)
         self.basedata = tmp['basedata']
         self.baseparams = tmp['baseparams']
         self.metaDf = tmp['metaDf']
 
     def _loadOne(self, sid, deferData):
-        if not deferData and type(self.metaDf.sim[sid].data) is str:
-            fullPath = self.dataPath + self.metaDf.sim.loc[sid].data
+        if not deferData and type(self.metaDf.sim[sid]) is str:
+            fullPath = self.dataPath + self.metaDf.sim.loc[sid]
             try:
                 """Load the data with the relative path"""
-                self.metaDf.sim.loc[ind].data = pd.read_pickle(fullPath)
+                self.metaDf.loc[ind,'sim'] = pd.read_pickle(fullPath)
             except IOError:
                 raise IOError('Data file does not exist: %s' % fullPath)
 
@@ -386,9 +417,6 @@ class simulationMeta(object):
         """Loads in the data and the results (if they exist) for a set of simulations,
            replacing the link with the actual object in resDf.
            This also replaces the old resDf object, freeing space taken by other simulations."""
-        if type(simIDs) is int:
-            simIDs = [simIDs]
-        
         self.loadMetaPkl()
 
         for sid in simIDs:
@@ -399,7 +427,7 @@ class simulationMeta(object):
         mers = set()
         for sid in self.metaDf.index:
             if type(self.metaDf.sim.loc[sid]) is str:
-                self.subLoad(sid,self.analysisName)
+                self.subLoad([sid],self.analysisName)
             s = self.metaDf.sim.loc[sid]
             mers.update(set(s.to_mers(nmers = nmers, returnList = True)))
         mers = sorted(list(mers))
@@ -414,7 +442,7 @@ class simulationMeta(object):
         hlas = set()
         for sid in self.metaDf.index:
             if type(self.metaDf.sim.loc[sid]) is str:
-                self.subLoad(sid,self.analysisName)
+                self.subLoad([sid],self.analysisName)
             s=self.metaDf.sim.loc[sid]
             hlas.update(set(s.to_hla(returnList=True)))
         hlas = sorted(list(hlas))
@@ -589,34 +617,47 @@ def plotPRatP(sname,simNames,analysisNames,pvalues,paramVec,paramLabel,colors,la
 """
 NOTE: these functions won't work anymore now that I've changed around the loading and unloading
 """
-def plotVariedParamGlobal(dataPath,analysisMethodNames,simName,variedParam='mutations_per_epitope',dx='vac'):
+def plotVariedParamGlobal(dataPath, analysisMethodNames, simName, variedParam = 'mutations_per_epitope', dx = 'vac', verbose = True):
+    if verbose:
+        logger = logging.getLogger('plot.%s' % (self.simName))
+    logger.setLevel(logging.INFO)
+
+    formatter = logging.Formatter('%(levelname)s:%(asctime)s:%(message)s')
+
+    """Create console handler and set level to debug"""
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(formatter)
+    self.logger.addHandler(ch)
+
+    logger.info('Starting plotVariedParamGlobal(%s) on %d analysis methods', simName, len(analysisMethods))
+
     """Plot the observed magnitude and significance of sieve analysis over the range of the varied parameter"""
-    dx = 1 if dx=='vac' else 0
+    dx = 1 if dx == 'vac' else 0
     mycm = ['darkgreen','fuchsia','saddlebrown','lightseagreen','gold','royalblue','tomato','thistle','tan']
     cutoff = 0.05
 
     clf()
-    colori=0
+    colori = 0
     for ai,aName in enumerate(analysisMethodNames):
-        if aName.find('global')>=0:
-            outFn=dataPath + 'sievesim/%s/%s.%s.meta.pkl' % (simName,simName,aName)
-            sims=simulationMeta()
-            print 'Loading %s...' % outFn,
+        if aName.find('global') >= 0:
+            outFn = dataPath + 'sievesim/%s/%s.%s.meta.pkl' % (simName,simName,aName)
+            sims = simulationMeta()
+            logger.info('Loading number %d (%s)', colori + 1, outFn)
             sims.load(outFn)
-            print 'done'
 
-            uValues=sorted(sims.resDf[variedParam].unique(),key=lambda x: x[dx])
+            uValues = sorted(sims.resDf[variedParam].unique(), key = lambda x: x[dx])
 
-            xvec=[]
-            yvec=[]
+            xvec = []
+            yvec = []
             for v in uValues:
                 xvec.append(v[dx])
                 yvec.append(sims.resDf.res[sims.resDf[variedParam]==v].map(lambda aObj: aObj.results.observed[0]).mean())
             subplot(2,1,1)
             plot(xvec,yvec,'-o',color=mycm[colori],lw=2,label=aName)
 
-            xvec=[]
-            yvec=[]
+            xvec = []
+            yvec = []
             for v in uValues:
                 """
                 tmpy=list(sims.resDf.res[sims.resDf[variedParam]==v].map(lambda aObj: -10*np.log10(aObj.results.pvalue[0])))
@@ -624,13 +665,13 @@ def plotVariedParamGlobal(dataPath,analysisMethodNames,simName,variedParam='muta
                 xvec.extend([v[dx]]*len(tmpy))
                 """
                 xvec.append(v[dx])
-                tmpy=sims.resDf.res[sims.resDf[variedParam]==v].map(lambda aObj: aObj.results.pvalue[0])
+                tmpy = sims.resDf.res[sims.resDf[variedParam]==v].map(lambda aObj: aObj.results.pvalue[0])
                 #tmpy[tmpy<(1/1e4)]=1/1e4
                 yvec.append(tmpy.map(pFunc).mean())
 
             subplot(2,1,2)
-            plot(xvec,yvec,'-o',color=mycm[colori],lw=2,label=aName)
-            colori+=1
+            plot(xvec, yvec, '-o', color = mycm[colori], lw = 2, label = aName)
+            colori += 1
 
     subplot(2,1,1)
     #xlabel(variedParam)

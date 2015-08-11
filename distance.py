@@ -26,12 +26,10 @@ Currently it looks as though with low nPerms and high simulation repeats prepare
 are the speed bottlenck. I could probably speed up the distance comp by using the 4D MATLAB style BA matrix and numexpr
 since this would vectorize the <, >, and sum operations."""
 
-from __future__ import division
-from seqtools import *
-from numpy import *
+from seqdistance.matrices import binarySubst, addGapScores
+import numpy as np
 import pandas as pd
 import itertools
-from nanfunctions import *
 from HLAPredCache import *
 
 __all__=['_vxmatch_distance',
@@ -41,9 +39,10 @@ __all__=['_vxmatch_distance',
          '_prepareAlignBA',
          '_prepareBTBA',
          '_prepareBA',
-         '_similarity_score']
+         '_similarity_score',
+         '_findall']
 
-def _vxmatch_distance(insertSeq,seqDf,params):
+def _vxmatch_distance(insertSeq, seqDf, params):
     """Computes a vaccine insert distance for each breakthrough sequence
     based on the specified "subst" similarity matrix.
 
@@ -77,21 +76,21 @@ def _vxmatch_distance(insertSeq,seqDf,params):
     N = seqDf.shape[0]
     nSites = len(insertSeq)
 
-    sim = ones((N,nSites))
+    sim = np.ones((N, nSites))
     
     """Compute insert2insert similarity for normalization.
     Similarity of insert to itself is high (exactly 1 for a hamming distance)"""
-    insert2insert = nanmean(_similarity_score(insertSeq, insertSeq, subst = subst))
+    insert2insert = np.nanmean(_similarity_score(insertSeq, insertSeq, subst = subst))
     
     for ptidi,ptid in enumerate(seqDf.index):
         """Similarity of a sequence to itself is also high and will be used in the normalization"""
-        seq2seq = nanmean(_similarity_score(seqDf.seq[ptid], seqDf.seq[ptid], subst = subst))
+        seq2seq = np.nanmean(_similarity_score(seqDf.seq[ptid], seqDf.seq[ptid], subst = subst))
         sim[ptidi,:] = _similarity_score(seqDf.seq[ptid], insertSeq, subst = subst, denominator = seq2seq + insert2insert)
     
     """similarity --> distance only works with correct normalization"""
     dist = 1 - sim
 
-    return pd.DataFrame(dist, index = seqDf.index, columns = arange(nSites))
+    return pd.DataFrame(dist, index = seqDf.index, columns = np.arange(nSites))
 
 def _indel_escape_distance(insertSeq, insertBA, seqDf, btBA, params):
     """Creates a distance matrix (DataFrame) [N x sites] with PTID rows and sites as columns
@@ -118,24 +117,24 @@ def _indel_escape_distance(insertSeq, insertBA, seqDf, btBA, params):
     N = seqDf.shape[0]
     nSites = insertBA.shape[1]
     
-    dist = nan*ones((N,nSites))
+    dist = np.nan * np.ones((N, nSites))
     for ptidi,ptid in enumerate(seqDf.index):
         """An indel is 'shared' if its found in both the insert and breakthrough kmer"""
-        unsharedIndel = zeros((len(btBA['validHLAs'][ptidi]), nSites), dtype = bool)
-        for sitei in xrange(nSites):
+        unsharedIndel = np.zeros((len(btBA['validHLAs'][ptidi]), nSites), dtype = bool)
+        for sitei in range(nSites):
             """grabKmer returns None if the kmer is invalid (e.g. off the end of the sequence)"""
             insertMer,_nonGapped = grabKmer(insertSeq, sitei, params['nmer'])
             btMer,_nonGapped = grabKmer(seqDf.seq[ptid], sitei, params['nmer'])
             
             """If the insert and the bt mer don't have gaps in the same places then there is an indel!"""
             if not insertMer is None:
-                if btMer is None or not all(array(findall(insertMer,'-')) == array(findall(btMer,'-'))):
+                if btMer is None or not np.all(np.array(_findall(insertMer,'-')) == np.array(_findall(btMer,'-'))):
                     unsharedIndel[:,sitei] = True
       
         tmpInsert = insertBA.ix[btBA['validHLAs'][ptidi]]
 
         """Do not double count escapes from homozygous alleles"""
-        dummy,uniqi = unique(btBA['validHLAs'][ptidi],return_index=True)
+        dummy,uniqi = np.unique(btBA['validHLAs'][ptidi], return_index = True)
 
         """ANY HLA: Escape count is 1 if the kmer binds and there is an indel in the BT seq"""
         #dist[ptidi,:] = squeeze(any((tmpInsert < params['binding']) & unsharedIndel, axis=0))
@@ -143,9 +142,9 @@ def _indel_escape_distance(insertSeq, insertBA, seqDf, btBA, params):
         """SUM HLAs: count 1 escape per HLA that binds (not including homozygous alleles"""
         dist[ptidi,:] = squeeze(sum(((tmpInsert < params['binding']).values & unsharedIndel)[uniqi,:],axis=0))
         
-    return pd.DataFrame(dist, index = btBA['ptid'], columns = arange(nSites))
+    return pd.DataFrame(dist, index = btBA['ptid'], columns = np.arange(nSites))
 
-def _binding_escape_distance(insertSeq,insertBA,seqDf,btBA,params):
+def _binding_escape_distance(insertSeq, insertBA, seqDf, btBA, params):
     """Creates a distance matrix (pd.DataFrame) [ptids x sites]
     populated with the HLA binding escape count distance.
 
@@ -183,13 +182,13 @@ def _binding_escape_distance(insertSeq,insertBA,seqDf,btBA,params):
     
     indelDist = (_indel_escape_distance(insertSeq, insertBA, seqDf, btBA, params).values > 0).astype(int)
 
-    dist = nan * ones((N,nSites))
-    for ptidi,ptid,ba,h in zip(arange(N), btBA['ptid'], btBA['ba'], btBA['validHLAs']):
+    dist = np.nan * np.ones((N,nSites))
+    for ptidi,ptid,ba,h in zip(np.arange(N), btBA['ptid'], btBA['ba'], btBA['validHLAs']):
         """Maxtrix of binding affinities for the hla alleles in h"""
         tmpInsert = insertBA.ix[h]
 
         """Do not double count escapes from homozygous alleles"""
-        dummy,uniqi = unique(h, return_index = True)
+        dummy,uniqi = np.unique(h, return_index = True)
 
         """ANY HLA: For each HLA (typically 4 per PTID), if it meets the criteria for this kmer then its an escape"""
         #dist[ptidi,:] = squeeze(any((tmpInsert<params['binding']) & (ba>params['escape']),axis=0)) * (1-indelDist[ptidi,:])
@@ -197,7 +196,7 @@ def _binding_escape_distance(insertSeq,insertBA,seqDf,btBA,params):
         """SUM HLAS: Count multiple escapes per kmer if the person has multiple alleles with escape"""
         dist[ptidi,:] = squeeze(sum(((tmpInsert < params['binding']).values & (ba > params['escape']))[uniqi,:], axis=0)) * (1 - indelDist[ptidi,:])
 
-    return pd.DataFrame(dist, index = btBA['ptid'], columns = arange(nSites))
+    return pd.DataFrame(dist, index = btBA['ptid'], columns = np.arange(nSites))
 
 def _prepareSeqBA(seq, hlas, ba, k, ignoreGappedKmers=False, getFast=False):
     """Prepare a matrix of binding affinities for all kmers in seq and all hlas.
@@ -225,7 +224,7 @@ def _prepareSeqBA(seq, hlas, ba, k, ignoreGappedKmers=False, getFast=False):
         Matrix of binding affinities with rows HLAs and columns as 0-indexed kmer start positions."""
     
     nSites = len(seq)
-    baMat = nan * ones((len(hlas),nSites))
+    baMat = np.nan * np.ones((len(hlas),nSites))
 
     if getFast:
         baFunc = lambda t: ba.getFast(t)
@@ -236,7 +235,7 @@ def _prepareSeqBA(seq, hlas, ba, k, ignoreGappedKmers=False, getFast=False):
         originalHLAs = hlas
         baFunc = lambda t: ba[t]
 
-    for sitei in xrange(nSites):
+    for sitei in range(nSites):
         """ngmer is None if the insert kmer starts with a gap '-', leave these as nan"""
         gmer,ngmer = grabKmer(seq,sitei,k)
         if not ignoreGappedKmers:
@@ -250,7 +249,7 @@ def _prepareSeqBA(seq, hlas, ba, k, ignoreGappedKmers=False, getFast=False):
                 if isvalidHLA(hla):
                     baMat[hlai,sitei] = baFunc((hla,mer))
 
-    return pd.DataFrame(baMat, index = originalHLAs, columns = arange(nSites))
+    return pd.DataFrame(baMat, index = originalHLAs, columns = np.arange(nSites))
 
 def _prepareAlignBA(seqs, hlas, ba, k, ignoreGappedKmers = False, getFast = False):
     """Prepare a matrix of binding affinities for all kmers, all HLAs and all seqs.
@@ -277,8 +276,8 @@ def _prepareAlignBA(seqs, hlas, ba, k, ignoreGappedKmers = False, getFast = Fals
     baMat : ndarray [nSeqs x nHLAs x nSites]
         Matrix of binding affinities"""
     
-    nSites = int(median([len(s) for s in seqs]))
-    baMat = nan * ones((len(seqs), len(hlas), nSites))
+    nSites = int(np.median([len(s) for s in seqs]))
+    baMat = np.nan * np.ones((len(seqs), len(hlas), nSites))
 
     """Go through each person, creating a bt BA [len(hla) x nSites] and assign to the big matrix"""
     for seqi,seq in enumerate(seqs):
@@ -288,9 +287,9 @@ def _prepareAlignBA(seqs, hlas, ba, k, ignoreGappedKmers = False, getFast = Fals
     if ignoreGappedKmers:
         """If the BA is nan for all HLAs then the kmer must have had a gap.
         If aross people, any kmer had a gap then set all people nan there"""
-        badSites = any(all(isnan(baMat), axis=1), axis=0)
+        badSites = np.any(np.all(np.isnan(baMat), axis=1), axis=0)
         """TODO: this could be simplified using numpy broadcasting"""
-        baMat[tile(badSites[None,None,:], (baMat.shape[0], baMat.shape[1],1))] = nan
+        baMat[np.tile(badSites[None,None,:], (baMat.shape[0], baMat.shape[1],1))] = np.nan
 
     return baMat
 
@@ -317,7 +316,12 @@ def _prepareBTBA(data, ba, params):
     """
     nSites = len(data.insertSeq)
 
-    fullBTBA = _prepareAlignBA(data.seqDf.seq, data.uHLA4, ba, params['nmer'], ignoreGappedKmers=params['ignoreGappedKmers'], getFast=params['getFast'])
+    fullBTBA = _prepareAlignBA(data.seqDf.seq,
+                               data.uHLA4,
+                               ba,
+                               params['nmer'],
+                               ignoreGappedKmers = params['ignoreGappedKmers'],
+                               getFast = params['getFast'])
 
     """Go through each person, creating a bt BA [len(hla) x nSites]"""
     btBA = {'ptid':[],'validHLAs':[],'ba':[]}
@@ -331,7 +335,7 @@ def _prepareBTBA(data, ba, params):
                 validHLAs.append(hla)
         
         """New way using the full BTBA"""
-        tmpba = nan*ones((len(validHLAs),nSites))
+        tmpba = np.nan * np.ones((len(validHLAs),nSites))
         for i,h in enumerate(validHLAs):
             hlai = list(data.uHLA4).index(h)
             tmpba[i,:]=fullBTBA[ptidi,hlai,:]
@@ -342,7 +346,7 @@ def _prepareBTBA(data, ba, params):
     
     return btBA
 
-def _prepareBA(data,ba,params):
+def _prepareBA(data, ba, params):
     """Prepare matrices of log-IC50 HLA binding affinities for insert and breakthrough sequences
     Used by several T-cell based sieve distances.
 
@@ -376,13 +380,23 @@ def _prepareBA(data,ba,params):
     ignoreGappedKmers = params.get('ignoreGappedKmers',False)
 
     """Create matrix of insert BA [len(uHLA4) x nSites]"""
-    insertBA = _prepareSeqBA(data.insertSeq,data.uHLA4, ba, params['nmer'], ignoreGappedKmers=params['ignoreGappedKmers'], etFast=params['getFast'])
+    insertBA = _prepareSeqBA(data.insertSeq,
+                             data.uHLA4,
+                             ba,
+                             params['nmer'],
+                             ignoreGappedKmers = params['ignoreGappedKmers'],
+                             etFast = params['getFast'])
 
     if not fullBT:
         btBA = _prepareBTBA(data,ba,params)
     else:
         """New structure required by _relative_binding_escape distance"""
-        btBA = _prepareAlignBA(data.seqDf.seq,data.uHLA4, ba, params['nmer'], ignoreGappedKmers=params['ignoreGappedKmers'], getFast=params['getFast'])
+        btBA = _prepareAlignBA(data.seqDf.seq,
+                               data.uHLA4,
+                               ba,
+                               params['nmer'],
+                               ignoreGappedKmers = params['ignoreGappedKmers'],
+                               getFast = params['getFast'])
     
     return insertBA, btBA, ba.predictionMethod
 
@@ -400,6 +414,10 @@ def _similarity_score(seq1, seq2, subst, denominator = 2):
     This can create a problem for vxmatch using similarity matrices other than binarySubst"""
 
     """Similarity between seq1 and seq2 using the substitution matrix subst"""
-    sim12 = array([i for i in itertools.imap(lambda a,b: subst.get((a,b), subst.get((b,a))), seq1, seq2)])
+    sim12 = np.array([i for i in itertools.imap(lambda a,b: subst.get((a,b), subst.get((b,a))), seq1, seq2)])
 
     return (2 * sim12) / denominator
+
+def _findall(s, item):
+    """Return index of each element equal to item in s"""
+    return [i for i,x in enumerate(s) if x == item]
