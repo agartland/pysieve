@@ -25,7 +25,7 @@ __all__ = ['relative_binding_escape_kmerAnalysis',
 class relative_binding_escape_kmerAnalysis(siteAnalysis):
     """Similar to binding escape except that it uses the median of non-binding HLAs as an escape threshold
     Performed on the kmer level (the sites dimension is kmer start positions)"""
-    methodName='relative_binding_escape_kmer'
+    methodName = 'relative_binding_escape_kmer'
 
     def initialize(self, ba, params = {'nmer':9}):
         """Calls the private-like function defined in analysis.py"""
@@ -121,7 +121,7 @@ class binding_scan_kmerAnalysis(siteScanAnalysis):
         out = _prepareBA(self.data, ba, params)
         self.results.insertBA, self.results.btBA, self.results.hlaMethod = out
 
-    def computeDistance(self, params = {'nmer':9,'bindingRange':arange(4,7.2,0.2),'escapeRange':arange(5,10.2,0.2),'minDelta':1}):
+    def computeDistance(self, params = {'nmer':9,'bindingRange':np.arange(4,7.2,0.2),'escapeRange':np.arange(5,10.2,0.2),'minDelta':1}):
         """Creates a new distance matrix given the params (wiping out previously stored results)"""
         self.results.params = deepcopy(params)
         self.results.dist = _binding_scan_distance(self.data.insertSeq,
@@ -166,7 +166,7 @@ class indel_binding_scan_kmerAnalysis(binding_scan_kmerAnalysis):
     """HLA indel + binding escape count performed on the kmer level with a parameter scan"""
     methodName = 'indel_binding_scan_kmer'
 
-    def computeDistance(self,params={'nmer':9,'bindingRange':arange(4,7.2,0.2),'escapeRange':arange(5,10.2,0.2),'minDelta':1}):
+    def computeDistance(self,params={'nmer':9,'bindingRange':np.arange(4,7.2,0.2),'escapeRange':np.arange(5,10.2,0.2),'minDelta':1}):
         """Creates a new distance matrix given the params (wiping out previously stored results)"""
         self.results.params = deepcopy(params)
         self.results.dist = _indel_scan_distance(self.data.insertSeq,
@@ -276,7 +276,7 @@ class binding_scan_globalAnalysis(globalScanAnalysis):
     def paramPairs(self):
         return [(Decimal('%1.1f' % b),Decimal('%1.1f' % e)) for b,e in itertools.product(self.results.params['bindingRange'],self.results.params['escapeRange'])]
 
-    def computeDistance(self,params={'nmer':9,'bindingRange':arange(4,7.2,0.2),'escapeRange':arange(5,10.2,0.2),'minDelta':1}):
+    def computeDistance(self,params={'nmer':9,'bindingRange':np.arange(4,7.2,0.2),'escapeRange':np.arange(5,10.2,0.2),'minDelta':1}):
         """Creates a new distance matrix given the params (wiping out previously stored results)"""
         self.results.params = deepcopy(params)
         self.results.dist = _binding_scan_distance(self.data.insertSeq,
@@ -296,7 +296,7 @@ class binding_scan_globalAnalysis(globalScanAnalysis):
             distFilter = np.ones(self.results.dist.shape, dtype = bool)
         """Filter out nan distances (per PTID, not the whole site)"""
         """When dist is an ndarray, don't try to use the .values attribute"""
-        distFilter[isnan(self.results.dist)] = False
+        distFilter[np.isnan(self.results.dist)] = False
         self.results.distFilter = distFilter
         self.prepareDist()
         self.results.observed, maxi = self.comparisonStat(self.results.filteredDist,
@@ -366,7 +366,7 @@ class binding_kmerscan_globalAnalysis(binding_scan_globalAnalysis):
         self.results.filteredDist[~self.results.distFilter] = np.nan
 
         """Removing nans is fine for escape count-based distances and should speed up computation when paired with NONAN compstats"""
-        self.results.filteredDist[isnan(self.results.filteredDist)] = 0
+        self.results.filteredDist[np.isnan(self.results.filteredDist)] = 0
 
         #self.results.filteredDist=nansum(self.results.filteredDist,axis=1)
 
@@ -381,7 +381,7 @@ class binding_kmerscan_globalAnalysis(binding_scan_globalAnalysis):
             distFilter = np.ones(self.results.dist.shape, dtype = bool)
         """Filter out nan distances (per PTID, not the whole site)"""
         """When dist is an ndarray, don't try to use the .values attribute"""
-        distFilter[isnan(self.results.dist)] = False
+        distFilter[np.isnan(self.results.dist)] = False
         self.results.distFilter = distFilter
         self.prepareDist()
         

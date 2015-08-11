@@ -1,11 +1,7 @@
-from __future__ import division
-
 import pandas as pd
 import numpy as np
-from objhist import objhist
-from HLAPredCache import *
-from decimal import Decimal
 from copy import deepcopy
+import logging
 
 from permutation_compstats import *
 
@@ -100,22 +96,22 @@ class sieveAnalysis(object):
                        'Mean vaccine distance',
                        'Observed statistic',
                        'P-value']
-            df = pd.DataFrame(zeros((1,len(columns)),dtype=object),index = None,columns = columns)
+            df = pd.DataFrame(np.zeros((1,len(columns)), dtype = object),index = None,columns = columns)
             try:
                 """Sum across sites"""
                 dist = self.results.scannedDist.sum(axis=1)
             except:
                 dist = self.results.filteredDist
-            if self.results.analysisMethod=='vxmatch_maxt_global':
+            if self.results.analysisMethod == 'vxmatch_maxt_global':
                 dist = dist.max(axis=1)
             plaDist = dist[self.data.plaInd].mean(axis=0)
             vacDist = dist[self.data.vacInd].mean(axis=0)
             observed = self.results.observed
-            if not isscalar(observed):
-                observed=float(observed)
+            if not np.isscalar(observed):
+                observed = np.float(observed)
             pvalue = self.results.pvalue
-            if not isscalar(pvalue):
-                pvalue = float(pvalue)
+            if not np.isscalar(pvalue):
+                pvalue = np.float(pvalue)
             df.iloc[0] = pd.Series([self.results.analysisMethod, plaDist,vacDist,observed,pvalue],index = columns)
         else:
             columns = ['Local method',
@@ -134,7 +130,7 @@ class sieveAnalysis(object):
             observed = self.results.observed
             pvalue = self.results.pvalue
             
-            df = pd.DataFrame(zeros((len(plaDist),len(columns)),dtype=object),index = None,columns = columns)
+            df = pd.DataFrame(np.zeros((len(plaDist),len(columns)), dtype = object),index = None,columns = columns)
             for sitei,(pdt,vdt,obs,p) in enumerate(zip(plaDist,vacDist,observed,pvalue)):
                 df.iloc[sitei] = pd.Series([self.results.analysisMethod,
                                             self.data.mapDf.hxb2Pos[sitei],
@@ -156,7 +152,7 @@ class sieveAnalysis(object):
             """If no filter exists then create a filter that excludes nans"""
             distFilter = np.ones(self.results.dist.shape, dtype = bool)
         """Filter out nan distances (per PTID, not the whole site)"""
-        distFilter[isnan(self.results.dist.values)] = False
+        distFilter[np.isnan(self.results.dist.values)] = False
         self.results.distFilter = distFilter
         """Prepare dist applies the distFilter and creates filteredDist (which also aggregates across sites for global distances)"""
         self.prepareDist()
@@ -181,7 +177,7 @@ class sieveAnalysis(object):
         """Predetermine the permutation indices"""
         np.random.seed(self.results.randomSeed)
         randInds = []
-        for permi in arange(nperms):
+        for permi in range(nperms):
             ind = np.random.permutation(self.data.N)
             randInds.append({'aInd':ind[:vacN],'bInd':ind[vacN:]})
         
