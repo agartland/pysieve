@@ -77,40 +77,56 @@ class sieveDataMethods(object):
     def to_nexus(self,fn):
         self.to_fasta(fn,fileformat='nexus',sep='_')
     
-    def to_fasta(self,fn,fileformat='fasta',sep='|'):
+    def to_fasta(self, fn = None, fileformat = 'fasta', withHLA = False, withTreatment = False, sep = '|'):
         """
-        >insert|study|protein|insert
-        >treatment|ptid|A1|A2|B1|B2
+        >reference|PROTEIN|INSERT
+        >ptid|A1|A2|B1|B2 or >ptid|treatment
         >HXB2
-        """        
-        outList=[SeqRecord(Seq(self.data.insertSeq,alphabet=Gapped(IUPAC.protein)), id='insert%s%s%s%s%s%s' % (sep,self.data.studyName,sep,self.data.proteinName,sep,self.data.insertName), description = ''),
-                 SeqRecord(Seq(self.data.HXB2,alphabet=Gapped(IUPAC.protein)), id='HXB2', description = '')]
-        tmp=self.data.seqDf.join(self.data.ptidDf)
-        for ptid,row in tmp.iterrows():
-            treatment='vaccine' if row['vaccinated'] else 'placebo'
+        """
+        if fn is None:
+            fn = '%s.%s.%s.fasta' % (self.studyName, self.proteinName, self.insertName)
 
-            if 'hla' in row.index and isinstance(row['hla'],basestring):
-                idStr="%s%s%s%s%s" % (treatment,sep,ptid,sep,sep.join(row['hla']))
-            else:
-                idStr="%s%s%s" % (treatment,sep,ptid)
-            rec = SeqRecord(Seq(row['seq'],alphabet=Gapped(IUPAC.protein)), id=idStr, description = '')
+        seqRecParams = dict(alphabet = Gapped(IUPAC.protein), description = '')
+        outList = [SeqRecord(Seq(self.data.insertSeq, id = 'reference%s%s%s%s' % (sep,self.data.proteinName,sep,self.data.insertName), **seqRecParams)),
+                   SeqRecord(Seq(self.data.HXB2, id = 'HXB2', **seqRecParams))]
+        tmp = self.data.seqDf.join(self.data.ptidDf)
+        for ptid,row in tmp.iterrows():
+            treatment = 'vaccine' if row['vaccinated'] else 'placebo'
+            idStr = ptid
+            if withTreatment:
+                idStr += '%s%s' % (sep,treatment)
+            if withHLA and 'hla' in row.index and isinstance(row['hla'],basestring):
+                idStr += '%s%s' % (sep,sep.join(row['hla']))
+
+            rec = SeqRecord(Seq(row['seq'], id = idStr, **seqRecParams))
             outList.append(rec)
         SeqIO.write(outList, fn, fileformat)
-    def to_mers(self,mersFn=None,nmers=[9],returnList=False):
-        allMers=[]
+    def to_treatment_file(self, fn = None, sep = '|'):
+        if fn is None:
+            fn = '%s.trt.csv' % self.studyName
+
+        tmpDf = self.ptidDf[['ptid','vaccinated']].copy()
+        tmpDf['treatment'] = tmpDf.vaccinated.map(lambda s: 'vaccine' if s else 'placebo')
+
+        refPtid = 'reference%s%s%s%s' % (sep,self.data.proteinName,sep,self.data.insertName)
+        tmpDf = tmpDf.append({'ptid':[refPtid], 'treatment':['reference']}, ignoreIndex = True)
+        tmpDf.to_csv(fn, index = False)
+
+    def to_mers(self, mersFn = None, nmers = [9], returnList = False):
+        allMers = []
         for seq in self.data.seqDf.seq:
-            allMers+=getMers(seq.replace('-',''),nmers=nmers)
-        allMers+=getMers(self.data.insertSeq.replace('-',''),nmers=nmers)
-        uMers=sorted(list(set(allMers)))
+            allMers += getMers(seq.replace('-',''), nmers = nmers)
+        allMers += getMers(self.data.insertSeq.replace('-',''), nmers = nmers)
+        uMers = sorted(list(set(allMers)))
         if returnList:
-            return filter(isvalidmer,uMers)
+            return filter(isvalidmer, uMers)
         else:
-            with open(mersFn,'w') as fh:
+            with open(mersFn, 'w') as fh:
                 for m in uMers:
                     if isvalidmer(m):
                         fh.write('%s\n' % m)
-    def to_hla(self,hlaFn=None,returnList=False):
-        convert=lambda h: h.replace('_','*')
+    def to_hla(self, hlaFn = None, returnList = False):
+        convert = lambda h: h.replace('_','*')
         if returnList:
             return map(convert,filter(isvalidHLA,self.data.uHLA4))
         else:
