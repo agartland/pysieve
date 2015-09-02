@@ -1,15 +1,10 @@
 """
 distance.py
-Distance functions to be called by the analysis functions, including:
-    vxmatch_global
-    vxmatch_site
-    binding_escape_global
-    binding_escape_kmer
+Distance functions to be called by the analysis functions.
 
 TODO:
  - Standardize inputs to distance functions to make the architecture more "plug-n-play"
  - Release a version of seqtools with the required functions to satisfy dependencies
-
 
 Generally a distance function should have the following inputs:
  - Sieve data object
@@ -34,6 +29,7 @@ from HLAPredCache import *
 
 __all__=['_vxmatch_distance',
          '_binding_escape_distance',
+         '_nepitope_distance',
          '_indel_escape_distance',
          '_prepareSeqBA',
          '_prepareAlignBA',
@@ -91,6 +87,40 @@ def _vxmatch_distance(insertSeq, seqDf, params):
     dist = 1 - sim
 
     return pd.DataFrame(dist, index = seqDf.index, columns = np.arange(nSites))
+
+def _nepitope_distance(insertBA, btBA, params):
+    """Creates a distance matrix (DataFrame) [N x sites]
+    indicating the number of PTIDs predicted to have an insert epitope for each kmer
+
+    Parameters
+    ----------
+    insertBA : pd.DataFrame
+        Row index as HLAs and colums as sites, shape [len(uHLA4) x nSites]
+    btBA : dict
+        Dict contains keys for (1) "validHLAs" HLAs used, (2) "ba" array([nHLAs (4 typically), nSites]) and (3) "ptid"
+    params : dict
+        Should contain 'binding' and 'nmer' parameters.
+
+    Returns
+    -------
+    dist : pd.DataFrame
+        Distance matrix [ptids x sites] with PTID row-index and sites (kmer start positions 0-indexed) as columns."""
+
+    N = len(btBA['ptid'])
+    nSites = insertBA.shape[1]
+    
+    dist = np.nan * np.ones((N,nSites))
+    for ptidi,ptid,ba,h in zip(np.arange(N), btBA['ptid'], btBA['ba'], btBA['validHLAs']):
+        tmpInsert = insertBA.ix[h]
+
+        """Do not double count escapes from homozygous alleles"""
+        dummy,uniqi = np.unique(h, return_index = True)
+
+        """Note that the original binding escape distance sums across HLAs not any's """
+        #dist[ptidi,:]=squeeze(any((tmpInsert<params['binding']),axis=0))
+        dist[ptidi,:] = np.squeeze(np.sum((tmpInsert < params['binding']).values[uniqi,:], axis = 0))
+
+    return pd.DataFrame(dist, index = btBA['ptid'], columns = np.arange(nSites))
 
 def _indel_escape_distance(insertSeq, insertBA, seqDf, btBA, params):
     """Creates a distance matrix (DataFrame) [N x sites] with PTID rows and sites as columns
