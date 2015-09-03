@@ -101,6 +101,7 @@ class sieveDataMethods(object):
             rec = SeqRecord(Seq(row['seq'], id = idStr, **seqRecParams))
             outList.append(rec)
         SeqIO.write(outList, fn, fileformat)
+
     def to_treatment_file(self, fn = None, sep = '|'):
         if fn is None:
             fn = '%s.trt.csv' % self.studyName

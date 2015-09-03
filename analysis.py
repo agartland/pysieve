@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from copy import deepcopy
 import logging
+import statsmodels.api as sm
 
 from permutation_compstats import *
 
@@ -85,19 +86,44 @@ class sieveAnalysis(object):
         if not self.results.permutations is None:
             if self.results.permutations.shape[0] > n:
                 self.results.permutations = self.results.permutations[:n]
+    def to_distance_csv(self, fn = None):
+        """Save the distances to a CSV file"""
+        if fn is None:
+            fn = '%s.%s.%s.%s.distance.csv' % (self.data.studyName, self.data.proteinName, self.data.insertName, self.results.analysisMethod)
+        self.to_distance_df().to_csv(fn, index = False)
+    def to_distance_df(self):
+        """Return distances in a pd.DataFrame()"""
+
+        columns = ['ptid',
+                   'display_position',
+                   'start_position',
+                   'distance_method',
+                   'distance']
+        try:
+            dist = self.results.scannedDist.values
+        except:
+            dist = self.results.filteredDist
+
+        """TODO: create df from dist"""
+        
+    return df
+        
     def to_csv(self, fn = None):
-        """Save the distances and the pvalues to a CSV file"""
-        self.to_df().to_csv(fn)
+        """Save the results to a CSV file"""
+        if fn is None:
+            fn = '%s.%s.%s.%s.results.csv' % (self.data.studyName, self.data.proteinName, self.data.insertName, self.results.analysisMethod)
+        self.to_df().to_csv(fn, index  = False)
     def to_df(self):
         """Return results in a pd.DataFrame()"""
         if isinstance(self, globalAnalysis):
-            columns = ['Global method',
-                       'Mean placebo distance',
-                       'Mean vaccine distance',
-                       'Observed statistic',
-                       'P-value']
-            df = pd.DataFrame(np.zeros((1,len(columns)), dtype = object),index = None,columns = columns)
-            try:
+            columns = ['distance_method',
+                       'mean_placebo_distance',
+                       'mean_vaccine_distance',
+                       'bbserved_statistic',
+                       'pvalue',
+                       'qvalue']
+            df = pd.DataFrame(np.zeros((1,len(columns)), dtype = object),index = None, columns = columns)
+            try: 
                 """Sum across sites"""
                 dist = self.results.scannedDist.sum(axis=1)
             except:
@@ -114,13 +140,14 @@ class sieveAnalysis(object):
                 pvalue = np.float(pvalue)
             df.iloc[0] = pd.Series([self.results.analysisMethod, plaDist,vacDist,observed,pvalue],index = columns)
         else:
-            columns = ['Local method',
-                       'Site',
-                       'Site index',
-                       'Mean placebo distance',
-                       'Mean vaccine distance',
-                       'Observed statistic',
-                       'P-value']
+            columns = ['distance_method',
+                       'display_position',
+                       'start_position',
+                       'mean_placebo_distance',
+                       'mean_vaccine_distance',
+                       'observed_statistic',
+                       'pvalue',
+                       'qvalue']
             try:
                 dist = self.results.scannedDist.values
             except:
@@ -129,16 +156,18 @@ class sieveAnalysis(object):
             vacDist = dist[self.data.vacInd,:].mean(axis=0)
             observed = self.results.observed
             pvalue = self.results.pvalue
+            _, qvalue = sm.stats.multipletests(pvalue, method = 'fdr_bh', alpha = 0.2)
             
-            df = pd.DataFrame(np.zeros((len(plaDist),len(columns)), dtype = object),index = None,columns = columns)
-            for sitei,(pdt,vdt,obs,p) in enumerate(zip(plaDist,vacDist,observed,pvalue)):
+            df = pd.DataFrame(np.zeros((len(plaDist), len(columns)), dtype = object),index = None, columns = columns)
+            for sitei,(pdt,vdt,obs,p,q) in enumerate(zip(plaDist,vacDist,observed,pvalue,qvalue)):
                 df.iloc[sitei] = pd.Series([self.results.analysisMethod,
                                             self.data.mapDf.hxb2Pos[sitei],
                                             sitei,
                                             pdt,
                                             vdt,
                                             obs,
-                                            p],index = columns)
+                                            p,
+                                            q],index = columns)
         return df
     def computeDistance(self, params = None):
         pass
