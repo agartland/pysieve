@@ -84,11 +84,13 @@ class sieveDataMethods(object):
         >HXB2
         """
         if fn is None:
-            fn = '%s.%s.%s.fasta' % (self.studyName, self.proteinName, self.insertName)
+            fn = '%s.%s.%s.fasta' % (self.data.studyName, self.data.proteinName, self.data.insertName)
 
-        seqRecParams = dict(alphabet = Gapped(IUPAC.protein), description = '')
-        outList = [SeqRecord(Seq(self.data.insertSeq, id = 'reference%s%s%s%s' % (sep,self.data.proteinName,sep,self.data.insertName), **seqRecParams)),
-                   SeqRecord(Seq(self.data.HXB2, id = 'HXB2', **seqRecParams))]
+        seqRecP = dict(description = '')
+        seqP = dict(alphabet = Gapped(IUPAC.protein))
+
+        outList = [SeqRecord(Seq(self.data.insertSeq, **seqP), id = 'reference%s%s%s%s' % (sep,self.data.proteinName,sep,self.data.insertName), **seqRecP),
+                   SeqRecord(Seq(self.data.HXB2, **seqP), id = 'HXB2', **seqRecP)]
         tmp = self.data.seqDf.join(self.data.ptidDf)
         for ptid,row in tmp.iterrows():
             treatment = 'vaccine' if row['vaccinated'] else 'placebo'
@@ -98,19 +100,19 @@ class sieveDataMethods(object):
             if withHLA and 'hla' in row.index and isinstance(row['hla'],basestring):
                 idStr += '%s%s' % (sep,sep.join(row['hla']))
 
-            rec = SeqRecord(Seq(row['seq'], id = idStr, **seqRecParams))
+            rec = SeqRecord(Seq(row['seq'], **seqP), id = idStr, **seqRecP)
             outList.append(rec)
         SeqIO.write(outList, fn, fileformat)
 
     def to_treatment_file(self, fn = None, sep = '|'):
         if fn is None:
-            fn = '%s.trt.csv' % self.studyName
+            fn = '%s.trt.csv' % self.data.studyName
 
-        tmpDf = self.ptidDf[['ptid','vaccinated']].copy()
+        tmpDf = self.data.ptidDf[['vaccinated']].copy()
         tmpDf['treatment'] = tmpDf.vaccinated.map(lambda s: 'vaccine' if s else 'placebo')
-
+        tmpDf = tmpDf.reset_index()
         refPtid = 'reference%s%s%s%s' % (sep,self.data.proteinName,sep,self.data.insertName)
-        tmpDf = tmpDf.append({'ptid':[refPtid], 'treatment':['reference']}, ignoreIndex = True)
+        tmpDf = tmpDf.append({'ptid':[refPtid], 'treatment':['reference']}, ignore_index = True)
         tmpDf.to_csv(fn, index = False)
 
     def to_mers(self, mersFn = None, nmers = [9], returnList = False):
