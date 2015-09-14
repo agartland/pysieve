@@ -90,10 +90,9 @@ class sieveAnalysis(object):
         """Save the distances to a CSV file"""
         if fn is None:
             fn = '%s.%s.%s.%s.distance.csv' % (self.data.studyName, self.data.proteinName, self.data.insertName, self.results.analysisMethod)
-        self.to_distance_df().to_csv(fn, index = False)
+        self.to_distance_df().to_csv(fn, index = False, na_rep='NAN')
     def to_distance_df(self):
         """Return distances in a pd.DataFrame()"""
-
         columns = ['ptid',
                    'display_position',
                    'start_position',
@@ -104,16 +103,26 @@ class sieveAnalysis(object):
         except:
             dist = self.results.filteredDist
 
-        """TODO: create df from dist"""
-        import ipdb
-        ipdb.set_trace()
+        d = {col:[] for col in columns}
+
+        for ptidi in range(dist.shape[0]):
+            for sitei in range(dist.shape[1]):
+                d['ptid'].append(self.data.ptidDf.index[ptidi])
+                d['display_position'].append(self.data.mapDf.hxb2Pos[sitei])
+                d['start_position'].append(sitei)
+                d['distance_method'].append(self.results.analysisMethod)
+                d['distance'].append(dist[ptidi,sitei])
+
+        df = pd.DataFrame(d)[columns]
         return df
         
+    def to_results_csv(self, fn=None):
+        self.to_csv(fn)
     def to_csv(self, fn = None):
         """Save the results to a CSV file"""
         if fn is None:
             fn = '%s.%s.%s.%s.results.csv' % (self.data.studyName, self.data.proteinName, self.data.insertName, self.results.analysisMethod)
-        self.to_df().to_csv(fn, index  = False)
+        self.to_df().to_csv(fn, index  = False, na_rep='NAN')
     def to_df(self):
         """Return results in a pd.DataFrame()"""
         if isinstance(self, globalAnalysis):
@@ -144,9 +153,9 @@ class sieveAnalysis(object):
             columns = ['distance_method',
                        'display_position',
                        'start_position',
-                       'mean_placebo_distance',
-                       'mean_vaccine_distance',
-                       'observed_statistic',
+                       'placebo_distance',
+                       'vaccine_distance',
+                       'sieve_statistic',
                        'pvalue',
                        'qvalue']
             try:
@@ -157,7 +166,7 @@ class sieveAnalysis(object):
             vacDist = dist[self.data.vacInd,:].mean(axis=0)
             observed = self.results.observed
             pvalue = self.results.pvalue
-            _, qvalue = sm.stats.multipletests(pvalue, method = 'fdr_bh', alpha = 0.2)
+            _, qvalue, _, _ = sm.stats.multipletests(pvalue, method = 'fdr_bh', alpha = 0.2)
             
             df = pd.DataFrame(np.zeros((len(plaDist), len(columns)), dtype = object),index = None, columns = columns)
             for sitei,(pdt,vdt,obs,p,q) in enumerate(zip(plaDist,vacDist,observed,pvalue,qvalue)):
