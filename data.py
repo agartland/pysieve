@@ -106,7 +106,7 @@ class sieveDataMethods(object):
 
     def to_treatment_file(self, fn = None, sep = '|'):
         if fn is None:
-            fn = '%s.trt.csv' % self.data.studyName
+            fn = '%s.%s.%s.trt.csv' % (self.data.studyName, self.data.proteinName, self.data.insertName)
 
         tmpDf = self.data.seqDf.join(self.data.ptidDf[['vaccinated']], how='left')
         tmpDf['treatment'] = tmpDf.vaccinated.map(lambda s: 'vaccine' if s else 'placebo')

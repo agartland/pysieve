@@ -107,7 +107,7 @@ class sieveAnalysis(object):
 
         for ptidi in range(dist.shape[0]):
             for sitei in range(dist.shape[1]):
-                d['ptid'].append(self.data.ptidDf.index[ptidi])
+                d['ptid'].append(self.data.seqDf.index[ptidi])
                 d['display_position'].append(self.data.mapDf.hxb2Pos[sitei])
                 d['start_position'].append(sitei)
                 d['distance_method'].append(self.results.analysisMethod)
