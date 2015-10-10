@@ -22,10 +22,12 @@ are the speed bottlenck. I could probably speed up the distance comp by using th
 since this would vectorize the <, >, and sum operations."""
 
 from seqdistance.matrices import binarySubst, addGapScores
+from seqdistance import hamming_distance
 import numpy as np
 import pandas as pd
 import itertools
 from HLAPredCache import *
+from decimal import Decimal
 
 __all__=['_vxmatch_distance',
          '_binding_escape_distance',
@@ -36,7 +38,10 @@ __all__=['_vxmatch_distance',
          '_prepareBTBA',
          '_prepareBA',
          '_similarity_score',
-         '_findall']
+         '_findall',
+         '_binding_scan_distance',
+         '_indel_scan_distance',
+         '_epitope_mismatch_distance']
 
 def _vxmatch_distance(insertSeq, seqDf, params):
     """Computes a vaccine insert distance for each breakthrough sequence
@@ -111,13 +116,13 @@ def _nepitope_distance(insertBA, btBA, params):
     
     dist = np.nan * np.ones((N,nSites))
     for ptidi,ptid,ba,h in zip(np.arange(N), btBA['ptid'], btBA['ba'], btBA['validHLAs']):
-        tmpInsert = insertBA.ix[h]
+        tmpInsert = insertBA.loc[h]
 
         """Do not double count escapes from homozygous alleles"""
         dummy,uniqi = np.unique(h, return_index = True)
 
         """Note that the original binding escape distance sums across HLAs not any's """
-        #dist[ptidi,:]=squeeze(any((tmpInsert<params['binding']),axis=0))
+        #dist[ptidi,:]=np.squeeze(np.any((tmpInsert<params['binding']),axis=0))
         dist[ptidi,:] = np.squeeze(np.sum((tmpInsert < params['binding']).values[uniqi,:], axis = 0))
 
     return pd.DataFrame(dist, index = btBA['ptid'], columns = np.arange(nSites))
@@ -161,16 +166,16 @@ def _indel_escape_distance(insertSeq, insertBA, seqDf, btBA, params):
                 if btMer is None or not np.all(np.array(_findall(insertMer,'-')) == np.array(_findall(btMer,'-'))):
                     unsharedIndel[:,sitei] = True
       
-        tmpInsert = insertBA.ix[btBA['validHLAs'][ptidi]]
+        tmpInsert = insertBA.loc[btBA['validHLAs'][ptidi]]
 
         """Do not double count escapes from homozygous alleles"""
-        dummy,uniqi = np.unique(btBA['validHLAs'][ptidi], return_index = True)
+        dummy,uniqi = np.unique(btBA['validHLAs'][ptidi], return_index=True)
 
         """ANY HLA: Escape count is 1 if the kmer binds and there is an indel in the BT seq"""
-        #dist[ptidi,:] = squeeze(any((tmpInsert < params['binding']) & unsharedIndel, axis=0))
+        #dist[ptidi,:] = np.squeeze(np.any((tmpInsert < params['binding']) & unsharedIndel, axis=0))
 
         """SUM HLAs: count 1 escape per HLA that binds (not including homozygous alleles"""
-        dist[ptidi,:] = squeeze(sum(((tmpInsert < params['binding']).values & unsharedIndel)[uniqi,:],axis=0))
+        dist[ptidi,:] = np.squeeze(np.sum(((tmpInsert < params['binding']).values & unsharedIndel)[uniqi,:],axis=0))
         
     return pd.DataFrame(dist, index = btBA['ptid'], columns = np.arange(nSites))
 
@@ -215,18 +220,18 @@ def _binding_escape_distance(insertSeq, insertBA, seqDf, btBA, params):
     dist = np.nan * np.ones((N,nSites))
     for ptidi,ptid,ba,h in zip(np.arange(N), btBA['ptid'], btBA['ba'], btBA['validHLAs']):
         """Maxtrix of binding affinities for the hla alleles in h"""
-        tmpInsert = insertBA.ix[h]
+        tmpInsert = insertBA.loc[h]
 
         """Do not double count escapes from homozygous alleles"""
-        dummy,uniqi = np.unique(h, return_index = True)
+        dummy,uniqi = np.unique(h, return_index=True)
 
         """ANY HLA: For each HLA (typically 4 per PTID), if it meets the criteria for this kmer then its an escape"""
-        #dist[ptidi,:] = squeeze(any((tmpInsert<params['binding']) & (ba>params['escape']),axis=0)) * (1-indelDist[ptidi,:])
+        #dist[ptidi,:] = np.squeeze(np.any((tmpInsert<params['binding']) & (ba>params['escape']),axis=0)) * (1-indelDist[ptidi,:])
 
         """SUM HLAS: Count multiple escapes per kmer if the person has multiple alleles with escape"""
-        dist[ptidi,:] = squeeze(sum(((tmpInsert < params['binding']).values & (ba > params['escape']))[uniqi,:], axis=0)) * (1 - indelDist[ptidi,:])
+        dist[ptidi,:] = np.squeeze(np.sum(((tmpInsert < params['binding']).values & (ba > params['escape']))[uniqi,:], axis=0)) * (1 - indelDist[ptidi,:])
 
-    return pd.DataFrame(dist, index = btBA['ptid'], columns = np.arange(nSites))
+    return pd.DataFrame(dist, index=btBA['ptid'], columns=np.arange(nSites))
 
 def _prepareSeqBA(seq, hlas, ba, k, ignoreGappedKmers=False, getFast=False):
     """Prepare a matrix of binding affinities for all kmers in seq and all hlas.
@@ -415,7 +420,7 @@ def _prepareBA(data, ba, params):
                              ba,
                              params['nmer'],
                              ignoreGappedKmers = params['ignoreGappedKmers'],
-                             etFast = params['getFast'])
+                             getFast = params['getFast'])
 
     if not fullBT:
         btBA = _prepareBTBA(data,ba,params)
@@ -451,3 +456,133 @@ def _similarity_score(seq1, seq2, subst, denominator = 2):
 def _findall(s, item):
     """Return index of each element equal to item in s"""
     return [i for i,x in enumerate(s) if x == item]
+
+def _indel_scan_distance(insertSeq, insertBA, seqDf, btBA, nmer, paramPairs, minDelta):
+    """Creates a distance matrix ndarray [N x sites x params]
+    populated with the indel escape count distance"""
+
+    N = seqDf.shape[0]
+    nSites = insertBA.shape[1]
+    nParams = len(paramPairs)
+    minDelta = Decimal('%1.1f' % minDelta)
+    
+    dist = np.nan*np.ones((N,nSites,nParams))
+    for ptidi,ptid in enumerate(seqDf.index):
+        unsharedIndel = np.zeros((len(btBA['validHLAs'][ptidi]),nSites), dtype=bool)
+        """Determine if there are any 'unshared' gaps in each kmer"""
+        for sitei in xrange(nSites):
+            insertMer,_nonGapped = grabKmer(insertSeq,sitei,nmer)
+            btMer,_nonGapped = grabKmer(seqDf.seq[ptid],sitei,nmer)
+            """If the insert and the bt mer don't have gaps in the same places then there is an indel!"""
+            if not insertMer is None:
+                if btMer is None or not np.all(np.array(_findall(insertMer,'-')) == np.array(_findall(btMer,'-'))):
+                    unsharedIndel[:,sitei] = True
+
+        tmpInsert = insertBA.loc[btBA['validHLAs'][ptidi]]
+
+        """Do not double count escapes from homozygous alleles"""
+        dummy,uniqi = np.unique(btBA['validHLAs'][ptidi], return_index=True)
+
+        """For each parameter pair compute the distance"""
+        for parami,pp in enumerate(paramPairs):
+            """A pair of binding and escape thresholds are only valid if escape - binding > delta"""
+            if (pp[1]-pp[0]) > minDelta:
+                """If any of the HLAs (typically 4 per PTID) meets the criteria for this kmer then its an escape"""
+                #dist[ptidi,:,parami]=np.squeeze(np.any((tmpInsert < pp[0]) & unsharedIndel,axis=0))
+                """The original binding escape distance, for EACH of the HLAs that meets the criteria...its an escape"""
+                dist[ptidi,:,parami] = np.squeeze(np.sum(((tmpInsert<np.float64(pp[0])).values & unsharedIndel)[uniqi,:],axis=0))
+    return dist
+
+def _binding_scan_distance(insertSeq, insertBA, seqDf, btBA, paramPairs, minDelta, nmer):
+    """Creates a distance matrix ndarray [N x sites x params]
+    populated with the HLA binding escape count distance"""
+    N = len(btBA['ptid'])
+    nSites = insertBA.shape[1]
+    nParams = len(paramPairs)
+    minDelta = Decimal('%1.1f' % minDelta)
+    
+    """Don't count a binding escape if there's also an indel there (these distances should be mutually exclusive)
+    Import to dichotomize this distance when used here though"""
+    #indelDist = (_indel_scan_distance(insertSeq, insertBA, seqDf, btBA, nmer, paramPairs, minDelta) > 0).astype(np.int64)
+
+    """Nan is default value!
+    This means that the following will be nan in dist:
+        non-existent insert kmers (ie start with '-') (ACTUALLY THESE SHOULD BE ZEROS)
+        invalid parameters (insufficient delta)
+        filteredDist will have nans at kmers that have been filtered out
+        it doesn't appear that there are other nans
+    This is important because it means in the compstats for binding escape i could set nan to 0
+    """
+    dist = np.nan * np.ones((N, nSites, nParams))
+    dummydist = np.nan * np.ones((N, nSites, nParams))
+    for ptidi,ptid,ba,h in zip(np.arange(N), btBA['ptid'], btBA['ba'], btBA['validHLAs']):
+        tmpInsert = insertBA.loc[h]
+
+        """Do not double count escapes from homozygous alleles"""
+        dummy,uniqi = np.unique(h, return_index=True)
+
+        for parami,pp in enumerate(paramPairs):
+            """A pair of binding and escape thresholds are only valid if escape - binding > delta"""
+            if (pp[1]-pp[0]) > minDelta:
+                tmp=(tmpInsert < np.float64(pp[0])).values & (ba > np.float64(pp[1]))
+                """Sum across HLAs"""
+                dist[ptidi,:,parami] = np.sum(tmp[uniqi,:], axis=0) #* (1-indelDist[ptidi,:,parami])
+                dummydist[ptidi,:,parami] = 1
+    return dist
+
+def _epitope_mismatch_distance(seqDf, insertSeq, insertDf, insertBA, btBA, params):
+    """Creates a distance matrix (DataFrame) [N x sites]
+    indicating the PTIDs with an insert epitope and a
+    breakthrough with greater than mmTolerance substitutions relative to the reference.
+
+    Parameters
+    ----------
+    seqDf : pd.DataFrame
+        PTID as index with seq column containing breakthrough sequences
+    insertSeq : str
+        Amino acid sequence of the insert
+    insertBA : pd.DataFrame
+        Row index as HLAs and colums as sites, shape [len(uHLA4) x nSites]
+    btBA : dict
+        Dict contains keys for (1) "validHLAs" HLAs used, (2) "ba" array([nHLAs (4 typically), nSites]) and (3) "ptid"
+    params : dict
+        Should contain binding, nmer, ignoreGappedKmers, and mmTolerance parameters.
+
+    Returns
+    -------
+    dist : pd.DataFrame
+        Distance matrix [ptids x sites] with PTID row-index and sites (kmer start positions 0-indexed) as columns."""
+
+    N = len(btBA['ptid'])
+    nSites = insertBA.shape[1]
+
+    mmCount = np.zeros((N, nSites))
+    for sitei in range(nSites):
+        """ngmer is None if the insert kmer starts with a gap '-', leave these as nan"""
+        igmer,ingmer = grabKmer(insertSeq, sitei, params['nmer'])
+        if not params['ignoreGappedKmers']:
+            """Use ngmer which starts at sitei and grabs the next nmer AAs (not counting gaps)"""
+            imer = ingmer
+        else:
+            imer = igmer
+        for ptidi,ptid in zip(np.arange(N), btBA['ptid']):
+            btgmer,btngmer = grabKmer(seqDf.seq.loc[ptid], sitei, params['nmer'])
+            if not params['ignoreGappedKmers']:
+                """Use ngmer which starts at sitei and grabs the next nmer AAs (not counting gaps)"""
+                btmer = btngmer
+            else:
+                btmer = btgmer
+        mmCount[ptidi,sitei] = hamming_distance(imer, btmer, asStrings=True)
+    
+    dist = np.nan * np.ones((N, nSites))
+    for ptidi,ptid,ba,h in zip(np.arange(N), btBA['ptid'], btBA['ba'], btBA['validHLAs']):
+        tmpInsert = insertBA.loc[h]
+
+        """Do not double count escapes from homozygous alleles"""
+        dummy,uniqi = np.unique(h, return_index=True)
+
+        """ANY HLA allele binds AND mmCount is greater than mmTolerance"""
+        dist[ptidi,:] = np.squeeze(np.any((tmpInsert < params['binding']).values[uniqi,:], axis=0))
+        dist[ptidi,:] = dist[ptidi,:] & (mmCount[ptidi,:] > params['mmTolerance'])
+
+    return pd.DataFrame(dist.astype(np.float64), index=btBA['ptid'], columns=np.arange(nSites))

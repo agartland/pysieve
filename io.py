@@ -13,6 +13,7 @@ __all__ = ['loadSieve',
 import pickle
 import os
 import pandas as pd
+import os.path as op
 
 def saveSieve(dataPath, obj, dataFn = None, analysisFn = None):
     """Save sieve analysis results and/or data to a file that can be loaded later
@@ -86,9 +87,10 @@ def _getFilename(dataPath, obj, ext):
             regStr = '%d_%d' % (obj.data.regionInds[0], obj.data.regionInds[-1])
         
         if obj.results.hlaMethod is None:
-            fn = dataPath + '%s/pyresults/%s.%s.%s.%s.%s' % (obj.data.studyName,obj.methodName,obj.data.proteinName,obj.data.insertName,regStr,ext)
+            filePart = '%s/pyresults/%s.%s.%s.%s.%s' % (obj.data.studyName,obj.methodName,obj.data.proteinName,obj.data.insertName,regStr,ext)
         else:
-            fn = dataPath + '%s/pyresults/%s.%s.%s.%s.%s.%s' % (obj.data.studyName,obj.methodName,obj.data.proteinName,obj.data.insertName,regStr,obj.results.hlaMethod,ext)
+            filePart = '%s/pyresults/%s.%s.%s.%s.%s.%s' % (obj.data.studyName,obj.methodName,obj.data.proteinName,obj.data.insertName,regStr,obj.results.hlaMethod,ext)
+        fn = op.join(dataPath,filePart)
     else:
         """Then its a data object"""
         if obj.regionInds is None:
@@ -96,12 +98,13 @@ def _getFilename(dataPath, obj, ext):
         else:
             regStr = '%d_%d' % (obj.regionInds[0], obj.regionInds[-1])
         if obj.HLAsubset:
-            fn = dataPath + '%s/pyresults/data.HLAsubset.%s.%s.%s.%s' % (obj.studyName,obj.proteinName,obj.insertName,regStr,ext)
+            filePart = '%s/pyresults/data.HLAsubset.%s.%s.%s.%s' % (obj.studyName,obj.proteinName,obj.insertName,regStr,ext)
         else:
-            fn = dataPath + '%s/pyresults/data.%s.%s.%s.%s' % (obj.studyName,obj.proteinName,obj.insertName,regStr,ext)
+            filePart = '%s/pyresults/data.%s.%s.%s.%s' % (obj.studyName,obj.proteinName,obj.insertName,regStr,ext)
+        fn = op.join(dataPath,filePart)
     
     folder,f = os.path.split(fn)
 
     if not os.path.exists(folder):
-        os.mkdir(folder)
+        os.makedirs(folder)
     return fn

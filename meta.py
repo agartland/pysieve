@@ -398,7 +398,7 @@ class simulationMeta(object):
             fullPath = self.dataPath + self.metaDf.sim.loc[sid]
             try:
                 """Load the data with the relative path"""
-                self.metaDf.loc[ind,'sim'] = pd.read_pickle(fullPath)
+                self.metaDf.loc[sid,'sim'] = pd.read_pickle(fullPath)
             except IOError:
                 raise IOError('Data file does not exist: %s' % fullPath)
 

@@ -111,9 +111,11 @@ class binding_scan_kmerAnalysis(siteScanAnalysis):
 
     @property
     def paramPairs(self):
-        return [(Decimal('%1.1f' % b), Decimal('%1.1f' % e)) for b,e in itertools.product(self.results.params['bindingRange'], self.results.params['escapeRange'])]
+        bindingRange = np.arange(self.results.params['bindingStart'], self.results.params['bindingEnd'], self.results.params['gridDt'])
+        escapeRange = np.arange(self.results.params['escapeStart'], self.results.params['escapeEnd'], self.results.params['gridDt'])
+        return [(Decimal('%1.1f' % b), Decimal('%1.1f' % e)) for b,e in itertools.product(bindingRange, escapeRange)]
 
-    def initialize(self, ba, params = {'nmer':9}):
+    def initialize(self, ba, params):
         """Calls the private-like function defined in analysis.py"""
         self.dropMissingHLA()
         self.results.params = deepcopy(params)
@@ -121,7 +123,7 @@ class binding_scan_kmerAnalysis(siteScanAnalysis):
         out = _prepareBA(self.data, ba, params)
         self.results.insertBA, self.results.btBA, self.results.hlaMethod = out
 
-    def computeDistance(self, params = {'nmer':9,'bindingRange':np.arange(4,7.2,0.2),'escapeRange':np.arange(5,10.2,0.2),'minDelta':1}):
+    def computeDistance(self, params):
         """Creates a new distance matrix given the params (wiping out previously stored results)"""
         self.results.params = deepcopy(params)
         self.results.dist = _binding_scan_distance(self.data.insertSeq,
@@ -132,7 +134,7 @@ class binding_scan_kmerAnalysis(siteScanAnalysis):
                                                    params['minDelta'],
                                                    params['nmer'])
 
-    def computeObserved(self, distFilter = None):
+    def computeObserved(self, distFilter=None):
         """
         Computes the observed distance between treatment groups using the filteredDist and the comparisonStat
         For a parameter scan analysis also creates in params a scannedBinding and scannedEscape which are the parmater pairs
@@ -166,7 +168,7 @@ class indel_binding_scan_kmerAnalysis(binding_scan_kmerAnalysis):
     """HLA indel + binding escape count performed on the kmer level with a parameter scan"""
     methodName = 'indel_binding_scan_kmer'
 
-    def computeDistance(self,params={'nmer':9,'bindingRange':np.arange(4,7.2,0.2),'escapeRange':np.arange(5,10.2,0.2),'minDelta':1}):
+    def computeDistance(self,params):
         """Creates a new distance matrix given the params (wiping out previously stored results)"""
         self.results.params = deepcopy(params)
         self.results.dist = _indel_scan_distance(self.data.insertSeq,
@@ -274,9 +276,11 @@ class binding_scan_globalAnalysis(globalScanAnalysis):
 
     @property
     def paramPairs(self):
-        return [(Decimal('%1.1f' % b),Decimal('%1.1f' % e)) for b,e in itertools.product(self.results.params['bindingRange'],self.results.params['escapeRange'])]
+        bindingRange = np.arange(self.results.params['bindingStart'], self.results.params['bindingEnd'], self.results.params['gridDt'])
+        escapeRange = np.arange(self.results.params['escapeStart'], self.results.params['escapeEnd'], self.results.params['gridDt'])
+        return [(Decimal('%1.1f' % b),Decimal('%1.1f' % e)) for b,e in itertools.product(bindingRange, escapeRange)]
 
-    def computeDistance(self,params={'nmer':9,'bindingRange':np.arange(4,7.2,0.2),'escapeRange':np.arange(5,10.2,0.2),'minDelta':1}):
+    def computeDistance(self,params):
         """Creates a new distance matrix given the params (wiping out previously stored results)"""
         self.results.params = deepcopy(params)
         self.results.dist = _binding_scan_distance(self.data.insertSeq,
@@ -318,12 +322,13 @@ class indel_binding_scan_globalAnalysis(binding_scan_globalAnalysis):
     """Global sieve analysis using the indel + binding escape count distance"""
     methodName = 'indel_binding_scan_global'
 
-    def computeDistance(self, params = {'nmer':9,'bindingRange':np.arange(4,7.2,0.2),'escapeRange':np.arange(5,10.2,0.2),'minDelta':1}):
+    def computeDistance(self, params):
         self.results.params = deepcopy(params)
         self.results.dist = _indel_scan_distance(self.data.insertSeq,
                                                  self.results.insertBA,
                                                  self.data.seqDf,
-                                                 self.results.btBA,params['nmer'],
+                                                 self.results.btBA,
+                                                 params['nmer'],
                                                  self.paramPairs,
                                                  params['minDelta'])
         self.results.dist += _binding_scan_distance(self.data.insertSeq,

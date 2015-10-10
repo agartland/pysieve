@@ -3,6 +3,7 @@ import numpy as np
 from copy import deepcopy
 import logging
 import statsmodels.api as sm
+import os.path as op
 
 from permutation_compstats import *
 
@@ -118,20 +119,23 @@ class sieveAnalysis(object):
         
     def to_results_csv(self, fn=None):
         self.to_csv(fn)
-    def to_csv(self, fn = None):
+    def to_csv(self, fn=None, fdir=None):
         """Save the results to a CSV file"""
         if fn is None:
             fn = '%s.%s.%s.%s.results.csv' % (self.data.studyName, self.data.proteinName, self.data.insertName, self.results.analysisMethod)
-        self.to_df().to_csv(fn, index  = False, na_rep='NAN')
+        if not fdir is None:
+            fullFn = op.join(fdir, fn)
+        else:
+            fullFn = fn
+        self.to_df().to_csv(fullFn, index  = False, na_rep='NAN')
     def to_df(self):
         """Return results in a pd.DataFrame()"""
         if isinstance(self, globalAnalysis):
             columns = ['distance_method',
                        'mean_placebo_distance',
                        'mean_vaccine_distance',
-                       'bbserved_statistic',
-                       'pvalue',
-                       'qvalue']
+                       'observed_statistic',
+                       'pvalue']
             df = pd.DataFrame(np.zeros((1,len(columns)), dtype = object),index = None, columns = columns)
             try: 
                 """Sum across sites"""
@@ -223,16 +227,11 @@ class sieveAnalysis(object):
         if clusterClient is None:
             self.results.permutations = permfunc(randInds,self.results.filteredDist,self.comparisonStat)
         else:
-            """Update code on remote machines"""
-            """
-            with open(SCRIPTS_PATH + 'pysieve/permutation_compstats.py','r') as fh:
-                code=fh.read()
-            clusterClient[:].execute(code,block=True)
-            """
             clusterClient[:]['remote_dist'] = self.results.filteredDist
-            clusterClient[:].scatter('remote_inds', randInds, block = True)
-            clusterClient[:].execute('remote_result=permfunc(remote_inds,remote_dist,%s)' % self.remoteComparisonStat, block = True)
-            self.results.permutations = clusterClient[:].gather('remote_result', block = True)
+            clusterClient[:].scatter('remote_inds', randInds, block=True)
+            clusterClient[:].execute('import pysieve.permutation_compstats', block=True)
+            clusterClient[:].execute('remote_result = pysieve.permutation_compstats.permfunc(remote_inds,remote_dist,pysieve.permutation_compstats.%s)' % self.remoteComparisonStat, block=True)
+            self.results.permutations = clusterClient[:].gather('remote_result', block=True)
 
             #self.results.permutations=ParallelFunction(clusterClient[:],permTestFunc,block=True,chunksize=nperms/(2*len(clusterClient)))(randInds)
             

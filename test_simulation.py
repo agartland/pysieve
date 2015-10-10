@@ -91,6 +91,7 @@ class TestSimulation(unittest.TestCase):
         sims.save()
         self.assertTrue(isinstance(sims.metaDf.sim.iloc[0], basestring))
         sims.subLoad([0])
+        print type(sims.metaDf.sim.iloc[0])
         self.assertTrue(isinstance(sims.metaDf.sim.iloc[0], sieveSimulation))
         
     @unittest.skip('d')
