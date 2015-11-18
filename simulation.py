@@ -56,9 +56,7 @@ import re
 
 import HLAPredCache
 from HLAPredCache import grabKmer, grabKmerInds, RandCache
-
-"""seqtools is not on github currently"""
-from seqtools import align2mat, fasta2df, padAlignment, consensus, identifyMindist
+from seqdistance import hamming_distance
 
 """Imports from within the pysieve module."""    
 from data import *
@@ -156,7 +154,7 @@ class sieveSimulation(sieveDataMethods):
         baseSeq = baseSeq[~baseSeq.vaccinated]['seq']
 
         """Make a list of possible AA for each site."""
-        baseSeqMat = align2mat(baseSeq)
+        baseSeqMat = _align2mat(baseSeq)
         possibleAA = [''.join(np.unique(baseSeqMat[:,coli])).replace('-','') for coli in np.arange(baseSeqMat.shape[1])]
         
         """Only sites that have no seqs with a gap and that have more than 1 possible AA are valid epitope indices (ie sites for a mutation)"""
@@ -692,7 +690,7 @@ def simSDFromLANL(alignmentsPath, protein, year, hlaFreq, clade = None, country 
     sd.proteinName = protein
     sd.studyName = 'LANL_Clade%s_%d' % (clade, year)
 
-    lanlDf = fasta2df(alignmentsPath + 'HIV1_FLT_%s_%s_PRO.fasta' % (year, protein))
+    lanlDf = _fasta2df(alignmentsPath + 'HIV1_FLT_%s_%s_PRO.fasta' % (year, protein))
 
     sd.HXB2 = lanlDf.seq[lanlDf.name=='HXB2_LAI_IIIB_BRU'].tolist()[0]
     if not clade is None:
@@ -706,7 +704,7 @@ def simSDFromLANL(alignmentsPath, protein, year, hlaFreq, clade = None, country 
     """Remove any sequences that have a gap at the positions that only have 1, 2 or 3 gaps.
     This increases the number of sites that can be analyzed/simulated without reducing the number of sequences by too much
     (With <=3 it should still be 396 clade C ZA in 2012, while for <=100 its 277 valid seqs)"""
-    #smat = align2mat(lanlDf.seq)
+    #smat = _align2mat(lanlDf.seq)
     #gapSiteInd = (np.sum(smat=='-',axis=0)>0) & (np.sum(smat=='-',axis=0)<=100)
     #gapSeqInd = np.any(smat[:,gapSiteInd]=='-',axis=1)
     #lanlDf = lanlDf.ix[lanlDf.index[~gapSeqInd]]"""
@@ -720,8 +718,8 @@ def simSDFromLANL(alignmentsPath, protein, year, hlaFreq, clade = None, country 
     sd.ptidDf = lanlDf[['vaccinated','infected']]
     
     """Use consensus or mindist for the insert sequence"""
-    #sd.insertSeq = consensus(sd.seqDf.seq)
-    sd.insertSeq = identifyMindist(sd.seqDf.seq, ignoreGaps = False)
+    #sd.insertSeq = _consensus(sd.seqDf.seq)
+    sd.insertSeq = _identifyMindist(sd.seqDf.seq, ignoreGaps=False)
     
     """Set up mapDf"""
     sd.mapDf = pd.DataFrame(np.zeros((len(sd.insertSeq),1),dtype=np.int32),columns=['posNum'])
@@ -758,4 +756,123 @@ def _discreteSampler(freqS, nsamples = 1):
     gridint = np.arange(len(freqS))
     arbdiscrete = stats.rv_discrete(values = (gridint, np.round(freqS, decimals=7)), name='arbdiscrete')
     values = arbdiscrete.rvs(size = nsamples)
-    return freqS.index[values].tolist()    
+    return freqS.index[values].tolist()
+
+def _padAlignment(align, applyPadding=True):
+    """Given an iterator of sequences, convert to pd.Series
+    Remove * or # from the end and pad sequences of different length with gaps
+    There is a warning if gaps are used for padding
+
+    Returns the align obj as pd.Series"""
+    if type(align) in [dict, np.ndarray, list]:
+        align = pd.Series(align)
+
+    """Replace *  and #  with - and - """
+    for ind in align.index:
+        if '*' in align[ind]:
+            align[ind] = align[ind].replace('*','-')
+        if '#' in align[ind]:
+            align[ind] = align[ind].replace('#','-')
+    """Pad with gaps if the lengths are all the same"""
+    if applyPadding:
+        L = align.map(len).unique()
+        if len(L) > 1:
+            #print 'Sequences have different lengths (pading with gaps): %s' % L
+            L = L.max()
+            for ind in align.index:
+                if len(align[ind]) < L:
+                    align[ind] = align[ind].ljust(L,'-')
+        else:
+            L = L.max()
+    return align
+
+def _consensus(align, ignoreGaps=True):
+    """Return a consensus sequence from the sequences in seqs
+    seqs can be a dict or a pd.Series of sequence strings
+
+    ignoresGaps unless all AA are gaps"""
+    align = padAlignment(align)
+    L = len(align[align.index[0]])
+
+    cons = ''
+    for aai in arange(L):
+        counts = objhist([seq[aai] for seq in align])
+        if ignoreGaps and len(counts)>1:
+            droppedGaps = counts.pop('-',0)
+        cons += max(counts.keys(), key=counts.get)
+    return cons
+def _identifyMindist(align, ignoreGaps=True):
+    """Compute a consensus sequence and return the sequence
+    in the alignment with the smallest (hamming) distance"""
+    cons = _consensus(align, ignoreGaps)
+    dist = align.map(partial(hamming_distance, cons))
+    return align[dist.argmin()]
+
+def _fasta2df(fn, sep='.', columns=['clade','country','year','name','seqid'], index=None, uniqueIndex=True):
+    """Read in a fasta file and turn it  into a Pandas DataFrame
+
+    Defaults parse the HIV LANL fasta alignments.
+
+    Parameters
+    ----------
+    sep : str
+        Separator in the description field.
+    columns : list
+       List of the sep delimited column names in-order.
+    index : str
+       Column to use as the DataFrame index (default: None)
+
+    Returns
+    -------
+    seqDf : pd.DataFrame
+        All sequences from the fasta file with a seq column containing the sequences."""
+    
+    with open(fn,'r') as fh:
+        records = SeqIO.parse(fh,'fasta')
+        sDict = {'seq':[]}
+        sDict.update({k:[] for k in columns})
+        for r in records:
+            sDict['seq'].append(str(r.seq))
+
+            info = r.description.split(sep)
+            for i in arange(len(columns)):
+                if i < len(info):
+                    sDict[columns[i]].append(info[i])
+                else:
+                    sDict[columns[i]].append('')
+
+    seqDf = pd.DataFrame(sDict)
+    if not index is None:
+        if seqDf.shape[0] == seqDf[index].unique().shape[0] or not uniqueIndex:
+            """If the index is unique fine, otherwise make a unique index by appending _%d"""
+            seqDf = seqDf.set_index(index)
+        else:
+            tmp = seqDf[index].copy()
+            for i,ind in enumerate(tmp.index):
+                tmp[ind] = '%d_%s' % (i,tmp[ind])
+            seqDf = seqDf.set_index(tmp)
+    return seqDf
+
+def _align2mat(align, k=1, gapped=True):
+    """Convert an alignment into a 2d numpy array of kmers [nSeqs x nSites/nKmers]
+    If gapped is True, returns kmers with gaps included.
+    If gapped is False, returns "non-gapped" kmers and each kmer starting with a gap is '-'*k 
+    See grabKmer() for definition of non-gapped kmer."""
+    tmp = padAlignment(align)
+    L = len(tmp.iloc[0])
+    Nkmers = L-k+1
+
+    if gapped:
+        """Slightly faster, but not as flexible"""
+        out = np.array([[s[i:i+k] for i in range(Nkmers)] for s in tmp], dtype='S%d' % k)
+    else:
+        out = np.empty((L,Nkmers), dtype='S%d' % k)
+        for seqi,seq in enumerate(tmp):
+            for starti in range(Nkmers):
+                #out[seqi,starti] = seq[starti:starti+k]
+                full, ng = grabKmer(seq, starti, k=k)
+                if ng is None:
+                    ng = '-'*k
+                out[seqi,starti] = ng
+    
+    return out
