@@ -41,7 +41,8 @@ __all__=['_vxmatch_distance',
          '_findall',
          '_binding_scan_distance',
          '_indel_scan_distance',
-         '_epitope_mismatch_distance']
+         '_epitope_mismatch_distance',
+         '_relative_binding_escape_distance']
 
 def _vxmatch_distance(insertSeq, seqDf, params):
     """Computes a vaccine insert distance for each breakthrough sequence
@@ -586,3 +587,119 @@ def _epitope_mismatch_distance(seqDf, insertSeq, insertDf, insertBA, btBA, param
         dist[ptidi,:] = dist[ptidi,:] & (mmCount[ptidi,:] > params['mmTolerance'])
 
     return pd.DataFrame(dist.astype(np.float64), index=btBA['ptid'], columns=np.arange(nSites))
+
+def _identifyNoPressureBT(insertBA, hlaMatrix, params):
+    """Identify the bt kmers that aren't under pressure from potential vaccine epitopes (the person doesn't have any binding HLAs for the kmer location)
+    Returns a numpy array [N x 1 x nSites]
+    insertBA: [nHLAs x nSites] pd.DataFrame
+    hlaMatrix: boolean matrix of HLA expression [ptid x nHLAs]
+    params: binding"""
+    N = hlaMatrix.shape[0]
+    nSites = insertBA.shape[1]
+
+    """Identify the binding HLAs at each site: [nHLAs x nSites] bool"""
+    bindingHLAs = insertBA < params['binding']
+
+    """Identify the breakthrough kmers (BA) associated with people lacking a binding allele at each site"""
+    """[ptid x hla x site]"""
+    tmpHLA = np.tile(hlaMatrix.values[:,:,None],(1,1,nSites))
+    tmpBinding = np.tile(bindingHLAs.values[None,:,:],(N,1,1))
+
+    """Use this to index into btBA to pull out the BA for kmers that were not under pressure by the HLA (e.g. btBA[:,hlai,:][noPressureBT])"""
+    """[ptid x 1 x sites]"""
+    """For each bt kmer, for it not to be under pressure,
+    it must either not be an insert binder or not be an HLA allele that the person expresses, across all HLAs"""
+    noPressureBT = np.all(~tmpBinding | ~tmpHLA, axis=1)[:,None,:]
+
+    """If any sites don't have any bt kmers that are not under pressure then raise an exception"""
+    if np.any(np.squeeze(noPressureBT.sum(axis=0)) == 0):
+        raise Exception("Can't compute escape threshold for all kmers!")
+    return noPressureBT
+
+
+def _relative_binding_escape_distance(insertSeq,insertBA,seqDf,btBA,hlaMatrix,params,lookupDf):
+    """Creates a distance matrix (DataFrame) [N x sites] with PTID rows and sites as columns
+    populated with the HLA binding escape count distance
+    
+    This is "Allan's distance" and it differs from the binding_escape distance
+    only in how the escape threshold is determined. The escape threshold is the
+    median of the BA of the non-binding HLAs with a given BT peptide
+
+    insertSeq: AA str
+    insertBA: [nHLAs x nSites] pd.DataFrame
+    seqDf: DataFrame with ptid rows and column seq containing BT seqs
+    btBA: FULL btBA matrix [nSeqs x nHLAs x nSites] ndarray (neccessary for this method)
+    hlaMatrix: boolean matrix of HLA expression [ptid x nHLAs]
+    params: binding"""
+
+    N = btBA.shape[0]
+    nSites = insertBA.shape[1]
+
+    """Don't count a binding escape if there's also an indel there (these distances should be mutually exclusive)
+    Import to make indelDist 0s and 1s to work for this purpose"""
+    #indelDist=(_indel_escape_distance(insertSeq,insertBA,seqDf,btBA,params).values > 0).astype(int64)
+
+    """Identify the breakthrough kmers (BA) associated with people lacking a binding allele at each site"""
+    noPressureBT = _identifyNoPressureBT(insertBA, hlaMatrix, params)
+    
+    """with open(DATA_PATH + 'STEP/andrew_rel_binding_escape.csv','w') as fh:
+        print >> fh, 'position,seqid,ptid,hla,insert_peptide,bt_peptide,rbe,be,cutoff,ndiff,y,BET'"""
+
+    dist = np.nan * np.ones((N,nSites))
+    for ptidi,ptid in enumerate(seqDf.index):
+        """Slice insertBA so that it only contains the valid HLAs of the current ptid"""
+        validHLAs = [h for h in hlaMatrix.columns[hlaMatrix.ix[ptid]] if isvalidHLA(h)]
+        validHLAInd = np.array([h in validHLAs for h in hlaMatrix.columns])
+        """[4 x nSites]"""
+        tmpInsert = insertBA.ix[validHLAs].values
+
+        """Do not double count escapes from homozygous alleles"""
+        uValidHLAs,uniqi = np.unique(validHLAs, return_index=True)
+
+        """For each HLA (typically 4 per PTID), if it meets the criteria for this kmer then its an escape"""
+
+        """[4 x nSites]"""
+        insertBinders = (tmpInsert < params['binding'])
+
+        """This is a complicated step:
+            (1) Pull out the BA for the HLAs associated with this ptid [N x 4 x nSites]
+            (2) Tile the noPressureBT index matrix along the hla axis [N x 4 nSites]
+            (3) Index (1) using (2) to yield a matrix of the btBAs with the current HLAs (4) at the sequences of people that had no binding HLA
+                [nonBinders x 4 x nSites]
+            (4) Take the median across nonBinders
+                [4 x nSites]
+        """
+
+        """Set all btBA that are under pressure from an HLA to nan prior to taking the median across bt kmers"""
+        tmpNoPressureInd = np.tile(noPressureBT, (1,len(validHLAs),1))
+        tmpBtBA = btBA[:,validHLAInd,:]
+        tmpBtBA[~tmpNoPressureInd] = np.nan
+        """tauThresholds [4 x nSites]"""
+        tauThresholds = np.nanmedian(tmpBtBA, axis=0)
+
+        """nonBTBinders [4 x nSites]"""
+        nonBTBinders = (btBA[ptidi,validHLAInd,:] > tauThresholds) & (tmpInsert < btBA[ptidi,validHLAInd,:])
+        escapes = (insertBinders & nonBTBinders)[uniqi,:]
+        dist[ptidi,:] = np.squeeze(np.sum(escapes, axis=0))# * (1-indelDist[ptidi,:])
+
+        """for hi in arange(escapes.shape[0]):
+            hla=uValidHLAs[hi]
+            hlai=insertBA.index==hla
+            seqid=lookupDf.index[lookupDf.ptid==ptid][0]
+            for kmeri in arange(escapes.shape[1]):
+                gapped,insertKmer=grabKmer(insertSeq,kmeri,k=params['nmer'])
+                gapped,btKmer=grabKmer(seqDf.seq[ptid],kmeri,k=params['nmer'])
+                try:
+                    hdist=hamming_distance(insertKmer,btKmer)
+                except TypeError:
+                    hdist=nan
+                
+                if seqid=='5021709' and kmeri==10 and hla=='A_2301':
+                    continue
+                    raise Exception()
+                
+                #print >> fh, 'position,seqid,ptid,hla,insert_peptide,bt_peptide,rbe,be,cutoff,ndiff,y,BET'
+                print >> fh, '%d,%s,%s,%s,%s,%s,%1.2f,%1.2f,%1.2f,%1.0f,%d,%1.1f' % (kmeri+1,
+                            seqid,ptid,hla,insertKmer,btKmer,insertBA[kmeri][hlai],btBA[ptidi,hlai,kmeri],
+                            tauThresholds[uniqi,:][hi,kmeri],hdist,escapes[hi,kmeri],params['binding'])"""
+    return pd.DataFrame(dist, index=seqDf.index, columns=insertBA.columns)
