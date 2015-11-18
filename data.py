@@ -163,12 +163,15 @@ class sieveDataMethods(object):
         self.data.N = self.data.seqDf.shape[0]
 
         """First join ptidDf and seqDf so that plaInd is always a valid boolean index on seqDf"""
-        df = self.data.seqDf.join(self.data.ptidDf,how = 'left')
+        df = self.data.seqDf.join(self.data.ptidDf)
         self.data.vacPtid = df.index[df.vaccinated]
         self.data.plaPtid = df.index[~df.vaccinated]
         """Type of plaInd is ndarray (NOT pd.Series)"""
         self.data.vacInd = df.vaccinated.values.astype(bool)
         self.data.plaInd = (~df.vaccinated).values.astype(bool)
+
+        self.data.ptidDf = df[self.data.ptidDf.columns]
+        self.data.seqDf = df[self.data.seqDf.columns]
 
         """Select region of protein based on regionInds"""
         if not self.data.regionInds is None and not self.data.isSliced:
