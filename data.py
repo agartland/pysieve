@@ -19,6 +19,7 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from Bio.Alphabet import Gapped, IUPAC
 from Bio.SubsMat.MatrixInfo import blosum90, ident
+from StringIO import StringIO
 
 class sieveData(object):
     masterFn = None
@@ -74,10 +75,15 @@ class sieveDataMethods(object):
         if sievedata is None:
             sievedata = sieveData()
         self.data = sievedata
+
+    def isvalidAnalysis(self, proteinName, insertName):
+        res = [va for va in s.validAnalyses if va['insertName']==insertName and va['proteinName']==proteinName]
+        return len(res) > 0
+        
     def to_nexus(self,fn):
         self.to_fasta(fn,fileformat='nexus',sep='_')
     
-    def to_fasta(self, fn = None, fileformat = 'fasta', withHLA = False, withTreatment = False, sep = '|'):
+    def to_fasta(self, fn=None, fileformat='fasta', withHLA=False, withTreatment=False, sep='|', returnString=False):
         """
         >reference|PROTEIN|INSERT
         >ptid|A1|A2|B1|B2 or >ptid|treatment
@@ -102,9 +108,16 @@ class sieveDataMethods(object):
 
             rec = SeqRecord(Seq(row['seq'], **seqP), id = idStr, **seqRecP)
             outList.append(rec)
-        SeqIO.write(outList, fn, fileformat)
 
-    def to_treatment_file(self, fn = None, sep = '|'):
+        if returnString:
+            fn = StringIO()
+            SeqIO.write(outList, fn, fileformat)
+            fn.seek(0)
+            return fn.read()
+        else:
+            SeqIO.write(outList, fn, fileformat)
+
+    def to_treatment_csv(self, fn=None, sep='|', returnString=False):
         if fn is None:
             fn = '%s.%s.%s.trt.csv' % (self.data.studyName, self.data.proteinName, self.data.insertName)
 
@@ -113,9 +126,15 @@ class sieveDataMethods(object):
         tmpDf = tmpDf.reset_index()[['index','treatment']]
         """refPtid = 'reference%s%s%s%s' % (sep,self.data.proteinName,sep,self.data.insertName)
         tmpDf = tmpDf.append({'ptid':refPtid, 'treatment':'reference'}, ignore_index = True)"""
-        tmpDf.to_csv(fn, index = False)
+        if returnString:
+            fn = StringIO()
+            tmpDf.to_csv(fn, index=False)
+            fn.seek(0)
+            return fn.read()
+        else:
+            tmpDf.to_csv(fn, index=False)
 
-    def to_mers(self, mersFn = None, nmers = [9], returnList = False):
+    def to_mers(self, mersFn=None, nmers=[9], returnList=False):
         allMers = []
         for seq in self.data.seqDf.seq:
             allMers += getMers(seq.replace('-',''), nmers = nmers)
