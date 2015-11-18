@@ -4,6 +4,7 @@ from copy import deepcopy
 import logging
 import statsmodels.api as sm
 import os.path as op
+from StringIO import StringIO
 
 from permutation_compstats import *
 
@@ -87,11 +88,19 @@ class sieveAnalysis(object):
         if not self.results.permutations is None:
             if self.results.permutations.shape[0] > n:
                 self.results.permutations = self.results.permutations[:n]
-    def to_distance_csv(self, fn = None):
+    def to_distance_csv(self, fn=None, returnString=False):
         """Save the distances to a CSV file"""
         if fn is None:
             fn = '%s.%s.%s.%s.distance.csv' % (self.data.studyName, self.data.proteinName, self.data.insertName, self.results.analysisMethod)
-        self.to_distance_df().to_csv(fn, index = False, na_rep='NAN')
+        
+        if returnString:
+            fn = StringIO()
+            self.to_distance_df().to_csv(fn, index=False, na_rep='NAN')
+            fn.seek(0)
+            return fn.read()
+        else:
+            self.to_distance_df().to_csv(fn, index=False, na_rep='NAN')
+
     def to_distance_df(self):
         """Return distances in a pd.DataFrame()"""
         columns = ['ptid',
@@ -99,10 +108,16 @@ class sieveAnalysis(object):
                    'start_position',
                    'distance_method',
                    'distance']
-        try:
-            dist = self.results.scannedDist.values
-        except:
+        
+        if hasattr(self.results, 'scannedDist') and not self.results.scannedDist is None:
+            dist = self.results.scannedDist
+        elif not self.results.filteredDist is None:
             dist = self.results.filteredDist
+        else:
+            dist = self.results.dist
+
+        if isinstance(dist, pd.DataFrame):
+            dist = dist.values
 
         d = {col:[] for col in columns}
 

@@ -124,6 +124,7 @@ class sieveDataMethods(object):
         tmpDf = self.data.seqDf.join(self.data.ptidDf[['vaccinated']], how='left')
         tmpDf['treatment'] = tmpDf.vaccinated.map(lambda s: 'vaccine' if s else 'placebo')
         tmpDf = tmpDf.reset_index()[['index','treatment']]
+        tmpDf = tmpDf.rename_axis({'index':'ptid'}, axis=1)
         """refPtid = 'reference%s%s%s%s' % (sep,self.data.proteinName,sep,self.data.insertName)
         tmpDf = tmpDf.append({'ptid':refPtid, 'treatment':'reference'}, ignore_index = True)"""
         if returnString:

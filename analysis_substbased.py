@@ -15,10 +15,8 @@ class vxmatch_siteAnalysis(siteAnalysis):
 
     methodName = 'vxmatch_site'
     def computeDistance(self, params = None):
-        """
-        Creates a new distance matrix given the params,
-        calling the common _vxmatch function and wiping out previously stored results
-        """
+        """Creates a new distance matrix given the params,
+        calling the common _vxmatch function and wiping out previously stored results"""
         self.results.params = deepcopy(params)
         self.results.dist = _vxmatch_distance(self.data.insertSeq, self.data.seqDf, params)
 
@@ -32,7 +30,7 @@ class vxmatch_globalAnalysis(globalAnalysis):
     specific global functions inherited from globalAnalysis though"""
     
     methodName = 'vxmatch_global'
-    def computeDistance(self, params = None):
+    def computeDistance(self, params=None):
         """Creates a new distance matrix given the params (wiping out previously stored results)
         This should be identical to the site-wise vxmatch distance functionm since
         filters need to be applied on a site-wise distance matrix (before site aggregation)"""
@@ -48,7 +46,7 @@ class gwj_globalAnalysis(globalAnalysis):
     comparisonStat = staticmethod(compstat_tstat_sumsquared)
     remoteComparisonStat = 'compstat_tstat_sumsquared'
 
-    def computeDistance(self, params = None):
+    def computeDistance(self, params=None):
         """
         Creates a new distance matrix given the params (wiping out previously stored results)
         This should be identical to the site-wise vxmatch distance functionm since
@@ -58,8 +56,8 @@ class gwj_globalAnalysis(globalAnalysis):
         self.results.dist = _vxmatch_distance(self.data.insertSeq, self.data.seqDf, self.results.params)
     def prepareDist(self):
         """Do not compute the summary stat since it needs to be done in the compstat perm test"""
-        self.results.filteredDist=deepcopy(self.results.dist.as_matrix())
-        self.results.filteredDist[~self.results.distFilter]=nan
+        self.results.filteredDist = deepcopy(self.results.dist.as_matrix())
+        self.results.filteredDist[~self.results.distFilter] = np.nan
 
 class vxmatch_maxt_globalAnalysis(sieveAnalysis):
     """Sieve analysis class using a whole-protein distance
