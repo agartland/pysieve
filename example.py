@@ -1,7 +1,13 @@
-from pylab import *
-from pysieve import *
+import numpy as np
+import pandas as pd
 
-class sieveHIV(sieveDataMethods):
+from HLAPredCache import hlaPredCache, RandCache
+import pysieve
+from pysieve import tcell, substbased
+from vtn_sieve import sieveVTN503, sieveVTN502, sieveVTN505, sieveRV144
+from seqdistance.matrices import binarySubst, addGapScores, binGapScores
+
+class sieveHIV(pysieve.sieveDataMethods):
     _validProteinInsertNames={'gag':'MRK_INSERT_GAG',
                               'nef':'MRK_INSERT_NEF',
                               'pol':'MRK_INSERT_POL'}
@@ -10,47 +16,38 @@ class sieveHIV(sieveDataMethods):
     def validAnalyses(self):
         return [(k,self._validProteinInsertNames[k]) for k in ['gag','pol','nef']]
 
-    def loadData(self,dataPath=None,proteinName='gag',insertName='NA',regionInds=None):
+    def loadData(self, dataPath=None, proteinName='gag', insertName='NA', regionInds=None):
         """Loads breakthrough sequences, vaccine sequences, HLA alleles and other participant data from study-specific files."""
         pass
 
 
 """Instantiation makes available some basic info about the trial
 (e.g. a list of protein and insert names that are valid)"""
-base = sieveHIV()
+base = sieveVTN502()
 validAnalyses = base.validAnalyses
 print base.studyName
 
-analysisParams = {'nmer':9,
-                  'binding':5,
-                  'escape':7,
-                  'ignoreGappedKmers':False,
-                  'subst':addGapScores(binarySubst,binGapScores)}
+analysisParams = {'subst':addGapScores(binarySubst, binGapScores)}
 
-figH = figure(1)
+for va in base.validAnalyses:
+    print va['proteinName'], va['insertName']
 
-for proteinName, insertName in base.validAnalyses:
-    data = sieveHIV()
-    data.loadData(proteinName = proteinName, insertName = insertName)
+s = sieveVTN502()
+s.loadData(proteinName='gag', insertName='MRK')
 
-    a = vxmatch_globalAnalysis(sievedata = data)
+a = pysieve.analysis_substbased.vxmatch_globalAnalysis(sievedata=s.data)
 
-    a.initialize(params = analysisParams)
+a.initialize(params=analysisParams)
+a.computeDistance(params=analysisParams)
+site_filter = pysieve.filters.diversityFilter(s.data, minMM=5, minM=5)
+a.computeObserved(filter=site_filter)
 
-    a.computeDistance()
-    
-    site_filter = diversityFilter(d, minMM=5, minM=5)
-    
-    a.computeObserved(filter = site_filter)
+a.permutationTest(1000)
+a.computePvalues()
 
-    a.permutationTest(10000, clusterClient = rclient)
-    a.computePvalues()
-    
-    dataFn,analysisFn = saveSieve(DATA_PATH,a)
-    a.to_csv(DATA_PATH + '%s.%s.results.csv' % (proteinName,insertName))
+resDf = a.to_df()
 
-    e = globalEval(a.data, a.results)
-
-    e.plotUnblindedDistance(figH)
-    figH.savefig(DATA_PATH + 'figures/%s.%s.unblinded_dist.png' % (proteinName,insertName))
-
+"""e = globalEval(a.data, a.results)
+figh = plt.figure(1)
+e.plotUnblindedDistance(figH)
+figh.savefig(DATA_PATH + 'figures/%s.%s.unblinded_dist.png' % (proteinName,insertName))"""
