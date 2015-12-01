@@ -2,6 +2,7 @@ from __future__ import division
 from distance import _nepitope_distance
 import numpy as np
 from epitope_hotspot import computeHLAHotspots
+from analysis_substbased import vxmatch_siteAnalysis
 
 """
 filters.py

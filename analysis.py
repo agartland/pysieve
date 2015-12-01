@@ -134,7 +134,7 @@ class sieveAnalysis(object):
         
     def to_results_csv(self, fn=None):
         self.to_csv(fn)
-    def to_csv(self, fn=None, fdir=None):
+    def to_csv(self, fn=None, fdir=None, returnString=False):
         """Save the results to a CSV file"""
         if fn is None:
             fn = '%s.%s.%s.%s.results.csv' % (self.data.studyName, self.data.proteinName, self.data.insertName, self.results.analysisMethod)
@@ -142,7 +142,15 @@ class sieveAnalysis(object):
             fullFn = op.join(fdir, fn)
         else:
             fullFn = fn
-        self.to_df().to_csv(fullFn, index  = False, na_rep='NAN')
+
+        if returnString:
+            fullFn = StringIO()
+            self.to_df().to_csv(fullFn, index=False, na_rep='NAN')
+            fullFn.seek(0)
+            return fullFn.read()
+        else:
+            self.to_df().to_csv(fullFn, index=False, na_rep='NAN')
+
     def to_df(self):
         """Return results in a pd.DataFrame()"""
         if isinstance(self, globalAnalysis):
@@ -151,7 +159,8 @@ class sieveAnalysis(object):
                        'mean_vaccine_distance',
                        'observed_statistic',
                        'pvalue']
-            df = pd.DataFrame(np.zeros((1,len(columns)), dtype = object),index = None, columns = columns)
+
+            df = pd.DataFrame(np.zeros((1,len(columns)), dtype=object),index=None, columns=columns)
             try: 
                 """Sum across sites"""
                 dist = self.results.scannedDist.sum(axis=1)
@@ -165,6 +174,8 @@ class sieveAnalysis(object):
             if not np.isscalar(observed):
                 observed = np.float(observed)
             pvalue = self.results.pvalue
+            if pvalue is None:
+                pvalue = np.nan
             if not np.isscalar(pvalue):
                 pvalue = np.float(pvalue)
             df.iloc[0] = pd.Series([self.results.analysisMethod, plaDist,vacDist,observed,pvalue],index = columns)
@@ -185,9 +196,13 @@ class sieveAnalysis(object):
             vacDist = dist[self.data.vacInd,:].mean(axis=0)
             observed = self.results.observed
             pvalue = self.results.pvalue
-            _, qvalue, _, _ = sm.stats.multipletests(pvalue, method = 'fdr_bh', alpha = 0.2)
+            if pvalue is None:
+                pvalue = np.nan * np.ones(len(observed))
+                qvalue = np.nan * np.ones(len(observed))
+            else:
+                _, qvalue, _, _ = sm.stats.multipletests(pvalue, method='fdr_bh', alpha=0.2)
             
-            df = pd.DataFrame(np.zeros((len(plaDist), len(columns)), dtype = object),index = None, columns = columns)
+            df = pd.DataFrame(np.zeros((len(plaDist), len(columns)), dtype=object), index=None, columns=columns)
             for sitei,(pdt,vdt,obs,p,q) in enumerate(zip(plaDist,vacDist,observed,pvalue,qvalue)):
                 df.iloc[sitei] = pd.Series([self.results.analysisMethod,
                                             self.data.mapDf.hxb2Pos[sitei],
@@ -196,7 +211,7 @@ class sieveAnalysis(object):
                                             vdt,
                                             obs,
                                             p,
-                                            q],index = columns)
+                                            q], index=columns)
         return df
     def computeDistance(self, params = None):
         pass

@@ -23,7 +23,7 @@ class sieveHIV(pysieve.sieveDataMethods):
 
 """Instantiation makes available some basic info about the trial
 (e.g. a list of protein and insert names that are valid)"""
-base = sieveVTN502()
+base = sieveVTN503()
 validAnalyses = base.validAnalyses
 print base.studyName
 
@@ -32,7 +32,7 @@ analysisParams = {'subst':addGapScores(binarySubst, binGapScores)}
 for va in base.validAnalyses:
     print va['proteinName'], va['insertName']
 
-s = sieveVTN502()
+s = sieveVTN503()
 s.loadData(proteinName='gag', insertName='MRK')
 
 a = pysieve.analysis_substbased.vxmatch_globalAnalysis(sievedata=s.data)
@@ -40,9 +40,9 @@ a = pysieve.analysis_substbased.vxmatch_globalAnalysis(sievedata=s.data)
 a.initialize(params=analysisParams)
 a.computeDistance(params=analysisParams)
 site_filter = pysieve.filters.diversityFilter(s.data, minMM=5, minM=5)
-a.computeObserved(filter=site_filter)
+a.computeObserved(distFilter=site_filter)
 
-a.permutationTest(1000)
+a.permutationTest(10000)
 a.computePvalues()
 
 resDf = a.to_df()
